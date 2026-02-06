@@ -25,17 +25,14 @@ hide_st_style = """
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
-# --- THE FIX: UNIVERSAL SECRET LOADER ---
+# --- HELPER: UNIVERSAL SECRET LOADER ---
 def get_secret(key, default_value):
     """Checks st.secrets first (Cloud), then os.environ (Local)."""
-    # 1. Check Streamlit Cloud Secrets
     if key in st.secrets:
         return st.secrets[key]
-    # 2. Check Local Environment (.env)
     return os.environ.get(key, default_value)
 
 # 4. Initialize Session State
-# We use the new get_secret function here
 if "business_name" not in st.session_state:
     st.session_state.business_name = get_secret("BUSINESS_NAME", "ReviewRocket Demo")
 
@@ -99,7 +96,7 @@ with tab1:
                 try:
                     final_phone = format_phone_number(country_code, phone_raw)
                     
-                    # Use get_secret for keys too, just to be safe
+                    # Credentials
                     sid = get_secret("TWILIO_ACCOUNT_SID", "")
                     token = get_secret("TWILIO_AUTH_TOKEN", "")
                     sender = get_secret("TWILIO_PHONE_NUMBER", "")
@@ -130,7 +127,6 @@ with tab2:
         if st.button("✨ Generate AI Response", use_container_width=True):
             try:
                 with st.spinner("Writing reply..."):
-                    # Use get_secret for API Key
                     api_key = get_secret("GOOGLE_API_KEY", "")
                     genai.configure(api_key=api_key)
                     
@@ -151,5 +147,15 @@ with tab3:
         st.text_input("Business Name", key="business_name")
         st.text_input("Google Review Link", key="review_link")
         
-        # DEBUG: Show where it pulled the data from (remove this later)
-        st.caption(f"Loaded from Cloud Secrets? {'Yes' if 'BUSINESS_NAME' in st.secrets else 'No'}")
+        # DEBUG info
+        st.caption(f"System Status: {'Connected to Cloud Secrets ✅' if 'BUSINESS_NAME' in st.secrets else 'Using Default Mode ⚠️'}")
+
+    st.markdown("---")
+    
+    # THE RESET BUTTON
+    if st.button("🔄 Reset to Original Settings", type="secondary"):
+        if "business_name" in st.session_state:
+            del st.session_state.business_name
+        if "review_link" in st.session_state:
+            del st.session_state.review_link
+        st.rerun()
