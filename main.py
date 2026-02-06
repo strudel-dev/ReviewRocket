@@ -11,8 +11,7 @@ load_dotenv()
 # 2. Page Configuration
 st.set_page_config(page_title="ReviewRocket", page_icon="🚀", layout="centered")
 
-# 3. Custom CSS (Polished UI)
-# Fixes spacing and hides the messy Streamlit header
+# 3. Custom CSS (The UI Polish)
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
@@ -27,6 +26,11 @@ hide_st_style = """
             }
             .stTextArea > div > div > textarea {
                 font-size: 16px;
+            }
+            
+            /* THE FIX: Hide the annoying 'Press Enter to submit' text */
+            [data-testid="InputInstructions"] {
+                display: none;
             }
             </style>
             """
@@ -66,7 +70,7 @@ if "business_name" not in st.session_state:
 if "review_link" not in st.session_state:
     st.session_state.review_link = get_secret("REVIEW_LINK", "https://google.com")
 
-# 5. Security: Login Gate (Now with 'Enter' key support!)
+# 5. Security: Login Gate (Fixed Enter Key & Overlap)
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
@@ -79,6 +83,7 @@ def check_password():
     # We use a 'form' so pressing Enter works naturally
     with st.form("login_form"):
         password = st.text_input("Enter Access Key", type="password")
+        # We use a primary button that spans the width
         submit_button = st.form_submit_button("Login", type="primary", use_container_width=True)
         
         if submit_button:
@@ -99,7 +104,7 @@ st.markdown(f"## {st.session_state.business_name} 🚀")
 # Tabs Renamed for Clarity
 tab1, tab2, tab3 = st.tabs(["📨 New Invite", "✍️ Reply Drafter", "⚙️ Settings"])
 
-# --- TAB 1: SEND REQUEST (Improved) ---
+# --- TAB 1: SEND REQUEST (Editable!) ---
 with tab1:
     with st.container(border=True):
         st.markdown("### Customer Details")
@@ -108,7 +113,7 @@ with tab1:
         with col1:
             customer_name = st.text_input("Name", placeholder="e.g. Sarah")
         with col2:
-            # Simple Phone Input (No country code dropdown)
+            # Simple Phone Input (No country code dropdown needed now)
             phone_raw = st.text_input("Mobile", placeholder="0412 345 678")
 
         st.markdown("### Message Preview")
@@ -138,12 +143,12 @@ with tab1:
                         to=final_phone
                     )
                     st.success(f"✅ Sent to {customer_name} ({final_phone})")
-                    time.sleep(2) # Show success for 2 seconds
+                    time.sleep(2) 
                     
                 except Exception as e:
                     st.error(f"Failed: {e}")
 
-# --- TAB 2: REVIEW RESPONDER (Real Utility) ---
+# --- TAB 2: REVIEW RESPONDER (Aussie Mode) ---
 with tab2:
     st.markdown("### Reply Assistant")
     st.caption("Paste a new review below to generate a professional Aussie response.")
@@ -169,6 +174,7 @@ with tab2:
                         Guidelines:
                         - Use Australian English spelling (e.g., 'honour', 'colour').
                         - Be friendly but professional (don't sound like a robot).
+                        - Avoid overly cheesy phrases.
                         - Keep it concise (2-3 sentences max).
                         - Sign it '- The Team' or '- Nicolette'.
                         
