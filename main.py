@@ -5,20 +5,19 @@ from twilio.rest import Client
 import google.generativeai as genai
 import time
 
-# 1. Load Environment Variables
+# 1. Load Environment Variables (For Local)
 load_dotenv()
 
 # 2. Page Configuration
 st.set_page_config(page_title="ReviewRocket", page_icon="🚀", layout="centered")
 
-# 3. Custom CSS (Polished UI)
+# 3. Custom CSS
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
             header {visibility: hidden;}
             .stApp {margin-top: -50px;}
-            /* Make inputs look sharper */
             .stTextInput > div > div > input {
                 border-radius: 10px;
             }
@@ -26,13 +25,22 @@ hide_st_style = """
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
-# 4. Initialize Session State (The Memory)
-# This checks if we have settings saved. If not, it pulls from your Secrets (Environment Variables).
+# --- THE FIX: UNIVERSAL SECRET LOADER ---
+def get_secret(key, default_value):
+    """Checks st.secrets first (Cloud), then os.environ (Local)."""
+    # 1. Check Streamlit Cloud Secrets
+    if key in st.secrets:
+        return st.secrets[key]
+    # 2. Check Local Environment (.env)
+    return os.environ.get(key, default_value)
+
+# 4. Initialize Session State
+# We use the new get_secret function here
 if "business_name" not in st.session_state:
-    st.session_state.business_name = os.environ.get("BUSINESS_NAME", "The Team")
+    st.session_state.business_name = get_secret("BUSINESS_NAME", "ReviewRocket Demo")
 
 if "review_link" not in st.session_state:
-    st.session_state.review_link = os.environ.get("REVIEW_LINK", "https://reviewrocket.com/demo")
+    st.session_state.review_link = get_secret("REVIEW_LINK", "https://google.com")
 
 # 5. Helper: Phone Formatter
 def format_phone_number(country_code, number):
@@ -67,7 +75,6 @@ if not check_password():
 
 st.markdown("## ReviewRocket 🚀")
 
-# Three Tabs now
 tab1, tab2, tab3 = st.tabs(["📨 New Request", "⭐ Pending Reviews", "⚙️ Settings"])
 
 # --- TAB 1: SEND REQUEST ---
@@ -83,7 +90,6 @@ with tab1:
         with col2:
             phone_raw = st.text_input("Mobile Number", placeholder="e.g. 0411 222 333")
 
-        # Preview the message so the user knows exactly what they are sending
         st.caption(f"📝 **Preview:** Hi [Name], thanks for choosing {st.session_state.business_name}! Please leave us a review here: {st.session_state.review_link}")
 
         if st.button("Send Request 🚀", use_container_width=True, type="primary"):
@@ -93,14 +99,18 @@ with tab1:
                 try:
                     final_phone = format_phone_number(country_code, phone_raw)
                     
-                    # Twilio Logic using DYNAMIC settings
-                    client = Client(os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"])
+                    # Use get_secret for keys too, just to be safe
+                    sid = get_secret("TWILIO_ACCOUNT_SID", "")
+                    token = get_secret("TWILIO_AUTH_TOKEN", "")
+                    sender = get_secret("TWILIO_PHONE_NUMBER", "")
+
+                    client = Client(sid, token)
                     
                     msg_body = f"Hi {customer_name}, thanks for choosing {st.session_state.business_name}! Please leave us a review here: {st.session_state.review_link}"
                     
                     message = client.messages.create(
                         body=msg_body,
-                        from_=os.environ["TWILIO_PHONE_NUMBER"],
+                        from_=sender,
                         to=final_phone
                     )
                     st.toast(f"✅ Sent to {customer_name}!", icon="🚀")
@@ -120,10 +130,12 @@ with tab2:
         if st.button("✨ Generate AI Response", use_container_width=True):
             try:
                 with st.spinner("Writing reply..."):
-                    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+                    # Use get_secret for API Key
+                    api_key = get_secret("GOOGLE_API_KEY", "")
+                    genai.configure(api_key=api_key)
+                    
                     model = genai.GenerativeModel('gemini-flash-latest')
                     
-                    # Inject business name into prompt
                     prompt = f"Write a short, professional response to this review for {st.session_state.business_name}. Review: 'Technician was on time...'. Sign it '- The Team'."
                     
                     response = model.generate_content(prompt)
@@ -134,11 +146,10 @@ with tab2:
 # --- TAB 3: SETTINGS ---
 with tab3:
     st.markdown("### Configuration")
-    st.info("ℹ️ These settings apply to all messages sent this session.")
     
     with st.container(border=True):
-        # We link these inputs directly to session_state
         st.text_input("Business Name", key="business_name")
         st.text_input("Google Review Link", key="review_link")
         
-        st.caption("Tip: To make these permanent, update your Secrets file.")
+        # DEBUG: Show where it pulled the data from (remove this later)
+        st.caption(f"Loaded from Cloud Secrets? {'Yes' if 'BUSINESS_NAME' in st.secrets else 'No'}")
