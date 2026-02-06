@@ -54,21 +54,34 @@ def fetch_stats_by_search(name):
         "X-Goog-Api-Key": MAPS_KEY,
         "X-Goog-FieldMask": "places.displayName,places.rating,places.userRatingCount,places.reviews,places.id"
     }
-    data = {"textQuery": name}
+    # AUTO-FIX: We append 'Australia' to the search to help it find local businesses
+    search_query = f"{name} Australia"
+    data = {"textQuery": search_query}
+    
     try:
         resp = requests.post(url, json=data, headers=headers)
-        if resp.status_code == 200 and resp.json().get('places'):
-            return resp.json()['places'][0]
-    except:
-        pass
-    return None
+        if resp.status_code == 200:
+            results = resp.json()
+            if results.get('places'):
+                return results['places'][0]
+            else:
+                st.error(f"❌ Google found 0 results for: '{search_query}'")
+                return None
+        else:
+            # SHOW THE REAL ERROR ON SCREEN
+            st.error(f"❌ Google API Error: {resp.status_code}")
+            st.code(resp.text) # This will tell us if it's a key issue
+            return None
+    except Exception as e:
+        st.error(f"❌ Connection Error: {e}")
+        return None
 
-# --- SESSION STATE INITIALIZATION (The Fix) ---
+# --- STATE ---
 if "history" not in st.session_state: st.session_state.history = []
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
-# We explicitly create these variables so the app never crashes checking for them
 if "place_id" not in st.session_state: st.session_state.place_id = None
 if "stats" not in st.session_state: st.session_state.stats = None
+if "fetch_attempted" not in st.session_state: st.session_state.fetch_attempted = False
 
 def check_login():
     query = st.query_params
@@ -89,12 +102,11 @@ def validate_user(password):
         raw_data = user_db[password].split("|")
         st.session_state.business_name = raw_data[0]
         st.session_state.review_link = raw_data[1]
-        # Safe check for Place ID
         st.session_state.place_id = raw_data[2] if len(raw_data) > 2 else None
         st.session_state.current_user_pass = password
         st.session_state.logged_in = True
-        # Force refresh of stats
         st.session_state.stats = None 
+        st.session_state.fetch_attempted = False # Reset fetch attempt
     else:
         st.error("Invalid Key")
 
@@ -102,7 +114,8 @@ check_login()
 if not st.session_state.logged_in: st.stop()
 
 # --- LOAD STATS ---
-if not st.session_state.stats:
+if not st.session_state.stats and not st.session_state.fetch_attempted:
+    st.session_state.fetch_attempted = True # Mark as tried
     if st.session_state.place_id:
         st.session_state.stats = fetch_stats_by_id(st.session_state.place_id)
     else:
@@ -119,63 +132,6 @@ if st.session_state.stats:
     c2.metric("Reviews", f"{count}")
     c3.metric("Invites", len(st.session_state.history))
 else:
-    st.warning("⚠️ Connecting to Google Maps...")
-
-st.divider()
-
-tab1, tab2, tab3 = st.tabs(["📨 Invite", "💬 Reviews", "⚙️ Settings"])
-
-with tab1:
-    col1, col2 = st.columns([1, 1.2])
-    with col1: name = st.text_input("Name", placeholder="e.g. Sarah")
-    with col2: phone = st.text_input("Mobile", placeholder="04...")
-    
-    default_msg = f"Hi {name if name else '...'}, thanks for choosing {st.session_state.business_name}! Review us here: {st.session_state.review_link}"
-    st.markdown("###### Customize Message:")
-    msg = st.text_area("Content", value=default_msg, height=100, label_visibility="collapsed")
-    st.markdown(f'<div class="iphone-bubble">{msg}</div>', unsafe_allow_html=True)
-    
-    if st.button("Send Invite 🚀", type="primary", use_container_width=True):
-        if not name or not phone: st.toast("Enter name & number")
-        else:
-            try:
-                client = Client(get_secret("TWILIO_ACCOUNT_SID"), get_secret("TWILIO_AUTH_TOKEN"))
-                client.messages.create(body=msg, from_=get_secret("TWILIO_PHONE_NUMBER"), to=smart_format_phone(phone))
-                st.success(f"Sent to {name}!")
-                st.balloons()
-                st.session_state.history.append({"Date": datetime.now().strftime("%d/%m"), "Name": name})
-            except Exception as e: st.error(f"Error: {e}")
-
-with tab2:
-    if st.session_state.stats and 'reviews' in st.session_state.stats:
-        reviews = st.session_state.stats['reviews']
-        for r in reviews:
-            author = r.get('authorAttribution', {}).get('displayName', 'Anonymous')
-            stars = r.get('rating', 5)
-            text = r.get('text', {}).get('text', '')
-            with st.container(border=True):
-                st.markdown(f"**{author}** <span style='float:right'>{'⭐'*stars}</span>", unsafe_allow_html=True)
-                if text:
-                    st.markdown(f"_{text}_")
-                    if st.button("Draft Reply", key=author):
-                        with st.spinner("Writing..."):
-                            genai.configure(api_key=AI_KEY)
-                            model = genai.GenerativeModel('gemini-flash-latest')
-                            reply = model.generate_content(f"Write a short, warm Aussie reply for {st.session_state.business_name} to: '{text}'")
-                            st.text_area("Copy this:", value=reply.text, height=100)
-                else:
-                    st.caption("(No text provided)")
-    else:
-        st.info("No reviews found yet.")
-        # FIX: Safe check for place_id prevents the crash here
-        if not st.session_state.get("place_id"):
-            st.caption("Tip: Add the Place ID to secrets.toml for better results.")
-
-with tab3:
-    st.markdown("### ⚙️ Settings")
-    st.text_input("Business", value=st.session_state.business_name, disabled=True)
-    if st.button("Logout", type="secondary"):
-        st.session_state.logged_in = False
-        # Clear stats on logout so next user gets fresh data
-        st.session_state.stats = None
-        st.rerun()
+    # If we tried and failed, show a warning. If we haven't tried, show connecting.
+    if st.session_state.fetch_attempted:
+        st.warning
