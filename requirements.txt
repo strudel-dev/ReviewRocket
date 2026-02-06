@@ -1,3 +1,4 @@
 streamlit
 twilio
 python-dotenv
+google-generativeai
