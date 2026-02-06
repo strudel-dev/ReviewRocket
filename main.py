@@ -3,56 +3,78 @@ import os
 from dotenv import load_dotenv
 from twilio.rest import Client
 import google.generativeai as genai
-import time
-from datetime import datetime
+import requests
 import pandas as pd
+from datetime import datetime
 
-# 1. Load Environment Variables
+# 1. Load Keys
 load_dotenv()
+MAPS_KEY = os.environ.get("GOOGLE_MAPS_KEY")
+AI_KEY = os.environ.get("GOOGLE_API_KEY")
 
-# 2. Page Configuration
+# 2. Config & CSS (Modern UI)
 st.set_page_config(page_title="ReviewRocket", page_icon="🚀", layout="centered")
-
-# 3. Custom CSS
 st.markdown("""
 <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
+    /* Hiding Streamlit Branding */
+    #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     .stApp {margin-top: -30px;}
-    .stTextInput > div > div > input { padding: 12px; font-size: 16px; border-radius: 12px; }
+    
+    /* Modern Card Style for Reviews */
+    .review-card {
+        background-color: white; border: 1px solid #e0e0e0; border-radius: 12px;
+        padding: 15px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
+    .star-rating { color: #f39c12; font-weight: bold; }
+    
+    /* iPhone Bubble */
     .iphone-bubble {
         background-color: #007AFF; color: white; padding: 15px; border-radius: 18px;
-        font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 15px;
-        line-height: 1.4; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        font-family: -apple-system, sans-serif; font-size: 15px; margin-bottom: 20px;
     }
-    [data-testid="InputInstructions"] { display: none; }
+    
+    /* Stats Bar */
+    [data-testid="stMetricValue"] { font-size: 24px; }
 </style>
 """, unsafe_allow_html=True)
 
 # --- HELPERS ---
 def get_secret(key):
-    # Checks Cloud Secrets first, then Local .env
-    if key in st.secrets:
-        return st.secrets[key]
+    if key in st.secrets: return st.secrets[key]
     return os.environ.get(key, "")
 
 def smart_format_phone(number):
     clean = number.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
     if clean.startswith("04") and len(clean) == 10: return "+61" + clean[1:]
     if clean.startswith("4") and len(clean) == 9: return "+61" + clean
-    if clean.startswith("+"): return clean
     return clean
 
-# 4. Session State Init
+# --- GOOGLE MAPS INTEGRATION ---
+def fetch_business_stats(business_name):
+    # 1. Find the Place ID
+    search_url = "https://places.googleapis.com/v1/places:searchText"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": MAPS_KEY,
+        "X-Goog-FieldMask": "places.id,places.rating,places.userRatingCount,places.reviews"
+    }
+    data = {"textQuery": business_name}
+    
+    try:
+        resp = requests.post(search_url, json=data, headers=headers)
+        if resp.status_code == 200 and resp.json().get('places'):
+            return resp.json()['places'][0]
+    except:
+        pass
+    return None
+
+# --- SESSION STATE ---
 if "history" not in st.session_state: st.session_state.history = []
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "business_name" not in st.session_state: st.session_state.business_name = ""
-if "review_link" not in st.session_state: st.session_state.review_link = ""
 
-# 5. MULTI-USER LOGIN SYSTEM
+# --- LOGIN LOGIC ---
 def check_login():
-    # A. Check URL Magic Link (?access=password)
     query_params = st.query_params
     url_pass = query_params.get("access", None)
     
@@ -60,108 +82,109 @@ def check_login():
         validate_user(url_pass)
         return
 
-    # B. If already logged in, skip
-    if st.session_state.logged_in:
-        return
+    if st.session_state.logged_in: return
 
-    # C. Show Login Form
-    st.markdown("<h1 style='text-align: center; margin-bottom: 0px;'>ReviewRocket 🚀</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: grey;'>Reputation Management System</p>", unsafe_allow_html=True)
-    
-    with st.form("login_form"):
-        password_input = st.text_input("Access Key", type="password")
-        submit_button = st.form_submit_button("Login", type="primary", use_container_width=True)
-        
-        if submit_button:
-            validate_user(password_input)
+    st.markdown("<h1 style='text-align: center;'>ReviewRocket 🚀</h1>", unsafe_allow_html=True)
+    with st.form("login"):
+        password = st.text_input("Access Key", type="password")
+        if st.form_submit_button("Login", type="primary", use_container_width=True):
+            validate_user(password)
             st.rerun()
 
 def validate_user(password):
-    # 1. Get the list of users from secrets
-    # We try to get 'users' table, if not found, fallback to empty dict
     user_db = st.secrets.get("users", {})
-    
-    # 2. Check if password exists in our "Phonebook"
     if password in user_db:
-        # Found them! format is "Name|Link"
-        user_data = user_db[password]
-        name, link = user_data.split("|")
-        
+        name, link = user_db[password].split("|")
         st.session_state.business_name = name
         st.session_state.review_link = link
-        st.session_state.current_user_pass = password # Save for magic link
+        st.session_state.current_user_pass = password
         st.session_state.logged_in = True
     else:
-        st.error("Invalid Access Key")
+        st.error("Invalid Key")
 
-# Run Login Check
 check_login()
-if not st.session_state.logged_in:
-    st.stop()
+if not st.session_state.logged_in: st.stop()
 
-# --- APP HEADER ---
-st.markdown(f"### {st.session_state.business_name} 🚀")
+# --- FETCH DATA (Only runs once per session to save API calls) ---
+if "stats" not in st.session_state:
+    with st.spinner(f"Connecting to Google for {st.session_state.business_name}..."):
+        data = fetch_business_stats(st.session_state.business_name)
+        st.session_state.stats = data
 
-with st.expander("📲 **Tap here to Install / Magic Link**"):
-    st.markdown("""
-    **Save time:** Add to home screen or bookmark the link below.
-    """)
-    if st.button("🔗 Create Auto-Login Link"):
-        # Generates link specific to THIS user's password
-        magic_link = f"https://reviewrocket.streamlit.app/?access={st.session_state.current_user_pass}"
-        st.code(magic_link, language="text")
-        st.success("Copy this link! It contains your unique login key.")
+# --- DASHBOARD HEADER ---
+st.markdown(f"### {st.session_state.business_name}")
+
+# SHOW LIVE GOOGLE STATS
+if st.session_state.stats:
+    rating = st.session_state.stats.get('rating', 'N/A')
+    count = st.session_state.stats.get('userRatingCount', 0)
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Google Rating", f"{rating} ⭐")
+    c2.metric("Total Reviews", f"{count}")
+    c3.metric("Invites Sent", len(st.session_state.history))
+    st.divider()
 
 # --- TABS ---
-tab1, tab2, tab3 = st.tabs(["📨 Invite", "✍️ AI Reply", "⚙️ Settings"])
+tab1, tab2, tab3 = st.tabs(["📨 Send Invite", "💬 Latest Reviews", "⚙️ Settings"])
 
 # --- TAB 1: INVITE ---
 with tab1:
     col1, col2 = st.columns([1, 1.2])
-    with col1: customer_name = st.text_input("Name", placeholder="e.g. Sarah")
-    with col2: phone_raw = st.text_input("Mobile", placeholder="04...")
+    with col1: name = st.text_input("Customer Name")
+    with col2: phone = st.text_input("Mobile Number")
 
-    default_msg = f"Hi {customer_name if customer_name else '...'}, thanks for choosing us! Please leave a review here: {st.session_state.review_link}"
-    
+    default_msg = f"Hi {name if name else '...'}, thanks for choosing us! Please leave a review here: {st.session_state.review_link}"
     st.markdown(f'<div class="iphone-bubble">{default_msg}</div>', unsafe_allow_html=True)
     
-    with st.expander("Edit Message"):
-        final_message = st.text_area("Content", value=default_msg, height=100, label_visibility="collapsed")
-
     if st.button("Send Invite 🚀", type="primary", use_container_width=True):
-        if not customer_name or not phone_raw:
-            st.toast("⚠️ Enter name and number", icon="⚠️")
+        if not name or not phone:
+            st.toast("⚠️ Missing details")
         else:
             try:
-                final_phone = smart_format_phone(phone_raw)
                 client = Client(get_secret("TWILIO_ACCOUNT_SID"), get_secret("TWILIO_AUTH_TOKEN"))
-                client.messages.create(body=final_message, from_=get_secret("TWILIO_PHONE_NUMBER"), to=final_phone)
-                
-                st.success(f"✅ Sent to {customer_name}")
-                st.balloons()
-                st.session_state.history.append({"Date": datetime.now().strftime("%d/%m %H:%M"), "Name": customer_name})
+                client.messages.create(body=default_msg, from_=get_secret("TWILIO_PHONE_NUMBER"), to=smart_format_phone(phone))
+                st.success(f"Sent to {name}!")
+                st.session_state.history.append({"Date": datetime.now().strftime("%d/%m"), "Name": name})
+                st.rerun() # Refresh stats
             except Exception as e:
                 st.error(f"Error: {e}")
 
-# --- TAB 2: AI ---
+# --- TAB 2: REVIEW FEED (The New Feature) ---
 with tab2:
-    review_text = st.text_area("Customer Review", height=100, placeholder="Paste review here...")
-    if st.button("Generate Reply ✨", use_container_width=True):
-        if review_text:
-            with st.spinner("Writing..."):
-                genai.configure(api_key=get_secret("GOOGLE_API_KEY"))
-                model = genai.GenerativeModel('gemini-flash-latest')
-                prompt = f"Write a warm, short Australian business reply for {st.session_state.business_name} to: '{review_text}'."
-                response = model.generate_content(prompt)
-                st.text_area("Suggested Reply", value=response.text, height=150)
+    st.caption("Recent reviews pulled from Google Maps")
+    
+    if st.session_state.stats and 'reviews' in st.session_state.stats:
+        reviews = st.session_state.stats['reviews']
+        
+        for review in reviews:
+            # Extract review data
+            author = review.get('authorAttribution', {}).get('displayName', 'Anonymous')
+            stars = review.get('rating', 5)
+            text = review.get('text', {}).get('text', 'No text provided.')
+            
+            # The Card UI
+            with st.container(border=True):
+                st.markdown(f"**{author}** <span style='float:right'>{'⭐'*stars}</span>", unsafe_allow_html=True)
+                st.write(f"_{text}_")
+                
+                # The "Draft Reply" Button
+                if st.button(f"Draft Reply for {author}", key=author):
+                    genai.configure(api_key=AI_KEY)
+                    model = genai.GenerativeModel('gemini-flash-latest')
+                    prompt = f"Write a short, professional Australian response to this review for {st.session_state.business_name}: '{text}'"
+                    reply = model.generate_content(prompt)
+                    st.text_area("Copy this reply:", value=reply.text, height=100)
+    else:
+        st.info("No reviews found or Google API limit reached.")
 
 # --- TAB 3: SETTINGS ---
 with tab3:
-    st.markdown("### ⚙️ Account Details")
-    st.info(f"Logged in as: **{st.session_state.business_name}**")
-    st.text_input("Business Name (Temporary)", key="business_name")
-    st.text_input("Review Link (Temporary)", key="review_link")
+    st.markdown("### 📱 Install App")
+    if st.button("Get Auto-Login Link"):
+        link = f"https://reviewrocket.streamlit.app/?access={st.session_state.current_user_pass}"
+        st.code(link, language="text")
     
-    if st.button("Logout"):
+    if st.button("Logout", type="secondary"):
         st.session_state.logged_in = False
         st.rerun()
