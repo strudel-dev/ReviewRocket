@@ -4,73 +4,84 @@ from dotenv import load_dotenv
 from twilio.rest import Client
 import google.generativeai as genai
 import time
+import pandas as pd
+from datetime import datetime
 
-# 1. Load Environment Variables (For Local)
+# 1. Load Environment Variables
 load_dotenv()
 
 # 2. Page Configuration
 st.set_page_config(page_title="ReviewRocket", page_icon="🚀", layout="centered")
 
-# 3. Custom CSS (The UI Polish)
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            .stApp {margin-top: -30px;}
-            
-            /* Bigger, friendlier inputs */
-            .stTextInput > div > div > input {
-                padding: 10px;
-                font-size: 16px;
-            }
-            .stTextArea > div > div > textarea {
-                font-size: 16px;
-            }
-            
-            /* THE FIX: Hide the annoying 'Press Enter to submit' text */
-            [data-testid="InputInstructions"] {
-                display: none;
-            }
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
+# 3. Custom CSS (Premium UI Polish)
+st.markdown("""
+<style>
+    /* Clean up the top bar */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .stApp {margin-top: -30px;}
+    
+    /* Input Styling */
+    .stTextInput > div > div > input {
+        padding: 12px;
+        font-size: 16px;
+        border-radius: 8px;
+    }
+    
+    /* Success Message Styling */
+    .stSuccess {
+        background-color: #d4edda;
+        color: #155724;
+        border-radius: 10px;
+    }
+    
+    /* The "iPhone Bubble" Preview */
+    .iphone-bubble {
+        background-color: #007AFF;
+        color: white;
+        padding: 15px;
+        border-radius: 18px;
+        font-family: sans-serif;
+        font-size: 15px;
+        line-height: 1.4;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        max-width: 80%;
+    }
+    
+    /* Hide annoying form instructions */
+    [data-testid="InputInstructions"] { display: none; }
+</style>
+""", unsafe_allow_html=True)
 
-# --- HELPER: UNIVERSAL SECRET LOADER ---
+# --- HELPERS ---
 def get_secret(key, default_value):
     if key in st.secrets:
         return st.secrets[key]
     return os.environ.get(key, default_value)
 
-# --- HELPER: SMART PHONE FORMATTER ---
 def smart_format_phone(number):
-    """Auto-converts 04xx to +614xx"""
-    # Remove spaces, dashes, parentheses
     clean = number.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
-    
-    # Check for Australian mobile format (04...)
     if clean.startswith("04") and len(clean) == 10:
         return "+61" + clean[1:]
-    
-    # If they typed 412... (missed the 0)
     if clean.startswith("4") and len(clean) == 9:
         return "+61" + clean
-        
-    # If it's already +61...
     if clean.startswith("+"):
         return clean
-        
-    # Fallback: Just return what they typed (let Twilio try it)
     return clean
 
 # 4. Initialize Session State
+if "history" not in st.session_state:
+    st.session_state.history = []
+
 if "business_name" not in st.session_state:
     st.session_state.business_name = get_secret("BUSINESS_NAME", "ReviewRocket Demo")
 
 if "review_link" not in st.session_state:
     st.session_state.review_link = get_secret("REVIEW_LINK", "https://google.com")
 
-# 5. Security: Login Gate (Fixed Enter Key & Overlap)
+# 5. Login Gate
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state.password_correct = False
@@ -78,129 +89,118 @@ def check_password():
     if st.session_state.password_correct:
         return True
 
-    st.markdown("<h1 style='text-align: center;'>ReviewRocket 🚀</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; margin-bottom: 0px;'>ReviewRocket 🚀</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: grey; margin-bottom: 30px;'>Reputation Management System</p>", unsafe_allow_html=True)
     
-    # We use a 'form' so pressing Enter works naturally
     with st.form("login_form"):
-        password = st.text_input("Enter Access Key", type="password")
-        # We use a primary button that spans the width
+        password = st.text_input("Access Key", type="password", placeholder="Enter password...")
         submit_button = st.form_submit_button("Login", type="primary", use_container_width=True)
-        
         if submit_button:
             if password == "rocket2026":
                 st.session_state.password_correct = True
                 st.rerun()
             else:
-                st.error("Access Denied.")
+                st.error("Incorrect Key")
     return False
 
 if not check_password():
     st.stop()
 
-# --- MAIN DASHBOARD ---
-
-st.markdown(f"## {st.session_state.business_name} 🚀")
-
-# Tabs Renamed for Clarity
-tab1, tab2, tab3 = st.tabs(["📨 New Invite", "✍️ Reply Drafter", "⚙️ Settings"])
-
-# --- TAB 1: SEND REQUEST (Editable!) ---
-with tab1:
-    with st.container(border=True):
-        st.markdown("### Customer Details")
-        
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            customer_name = st.text_input("Name", placeholder="e.g. Sarah")
-        with col2:
-            # Simple Phone Input (No country code dropdown needed now)
-            phone_raw = st.text_input("Mobile", placeholder="0412 345 678")
-
-        st.markdown("### Message Preview")
-        # Pre-fill the message but let her edit it!
-        default_message = f"Hi {customer_name if customer_name else '[Name]'}, thanks for choosing {st.session_state.business_name}! Please leave us a review here: {st.session_state.review_link}"
-        
-        final_message = st.text_area("Edit before sending:", value=default_message, height=100)
-
-        if st.button("Send Invite 🚀", use_container_width=True, type="primary"):
-            if not customer_name or not phone_raw:
-                st.warning("⚠️ Enter name and number first.")
-            else:
-                try:
-                    # Smart Formatting
-                    final_phone = smart_format_phone(phone_raw)
-                    
-                    # Twilio Credentials
-                    sid = get_secret("TWILIO_ACCOUNT_SID", "")
-                    token = get_secret("TWILIO_AUTH_TOKEN", "")
-                    sender = get_secret("TWILIO_PHONE_NUMBER", "")
-
-                    client = Client(sid, token)
-                    
-                    message = client.messages.create(
-                        body=final_message,
-                        from_=sender,
-                        to=final_phone
-                    )
-                    st.success(f"✅ Sent to {customer_name} ({final_phone})")
-                    time.sleep(2) 
-                    
-                except Exception as e:
-                    st.error(f"Failed: {e}")
-
-# --- TAB 2: REVIEW RESPONDER (Aussie Mode) ---
-with tab2:
-    st.markdown("### Reply Assistant")
-    st.caption("Paste a new review below to generate a professional Aussie response.")
+# --- SIDEBAR (SETTINGS) ---
+with st.sidebar:
+    st.title("⚙️ Settings")
+    st.text_input("Business Name", key="business_name")
+    st.text_input("Review Link", key="review_link")
     
-    with st.container(border=True):
-        review_text = st.text_area("Paste Customer Review:", height=100, placeholder="e.g. Nicolette was amazing! Photos are beautiful...")
-        
-        if st.button("✨ Write Reply", use_container_width=True):
-            if not review_text:
-                st.warning("Paste a review first.")
-            else:
+    st.divider()
+    
+    st.caption(f"Status: {'✅ Cloud Linked' if 'BUSINESS_NAME' in st.secrets else '⚠️ Local Mode'}")
+    
+    if st.button("🔄 Reset Defaults", type="secondary", use_container_width=True):
+        if "business_name" in st.session_state: del st.session_state.business_name
+        if "review_link" in st.session_state: del st.session_state.review_link
+        st.rerun()
+
+# --- MAIN APP ---
+st.title(f"{st.session_state.business_name}")
+
+tab1, tab2, tab3 = st.tabs(["📨 Send Invite", "✍️ Reply AI", "📜 History"])
+
+# --- TAB 1: SEND INVITE ---
+with tab1:
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        customer_name = st.text_input("Customer Name", placeholder="e.g. Sarah")
+    with col2:
+        phone_raw = st.text_input("Mobile Number", placeholder="04...")
+
+    # Dynamic Message Logic
+    default_msg = f"Hi {customer_name if customer_name else '...'}, thanks for choosing us! Please leave a review here: {st.session_state.review_link}"
+    
+    st.markdown("###### 👇 Message Preview")
+    
+    # The Visual "iPhone" Bubble
+    st.markdown(f'<div class="iphone-bubble">{default_msg}</div>', unsafe_allow_html=True)
+    
+    # Hidden editable box (optional, keeps UI clean)
+    with st.expander("Edit Message Text"):
+        final_message = st.text_area("Content", value=default_msg, height=100, label_visibility="collapsed")
+
+    if st.button("Send Invite 🚀", type="primary", use_container_width=True):
+        if not customer_name or not phone_raw:
+            st.toast("⚠️ Please enter a name and number", icon="⚠️")
+        else:
+            try:
+                final_phone = smart_format_phone(phone_raw)
+                
+                # Twilio Send
+                sid = get_secret("TWILIO_ACCOUNT_SID", "")
+                token = get_secret("TWILIO_AUTH_TOKEN", "")
+                sender = get_secret("TWILIO_PHONE_NUMBER", "")
+
+                client = Client(sid, token)
+                client.messages.create(
+                    body=final_message,
+                    from_=sender,
+                    to=final_phone
+                )
+                
+                # Success Logic
+                st.success(f"✅ Sent to {customer_name}")
+                st.balloons() # A little dopamine hit
+                
+                # Log to History
+                st.session_state.history.append({
+                    "Date": datetime.now().strftime("%H:%M"),
+                    "Name": customer_name,
+                    "Phone": final_phone,
+                    "Status": "Sent"
+                })
+                
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+# --- TAB 2: AI REPLY ---
+with tab2:
+    st.info("Paste a customer review below to generate a professional reply.")
+    review_text = st.text_area("Customer Review", height=100, placeholder="Paste review here...")
+    
+    if st.button("Generate Reply ✨", use_container_width=True):
+        if review_text:
+            with st.spinner("Thinking..."):
                 try:
-                    with st.spinner("Thinking..."):
-                        api_key = get_secret("GOOGLE_API_KEY", "")
-                        genai.configure(api_key=api_key)
-                        model = genai.GenerativeModel('gemini-flash-latest')
-                        
-                        # UPDATED PROMPT FOR AUSSIE TONE
-                        prompt = f"""
-                        You are the owner of {st.session_state.business_name}, an Australian business.
-                        Write a warm, professional, and authentic reply to this customer review.
-                        
-                        Guidelines:
-                        - Use Australian English spelling (e.g., 'honour', 'colour').
-                        - Be friendly but professional (don't sound like a robot).
-                        - Avoid overly cheesy phrases.
-                        - Keep it concise (2-3 sentences max).
-                        - Sign it '- The Team' or '- Nicolette'.
-                        
-                        Review: "{review_text}"
-                        """
-                        
-                        response = model.generate_content(prompt)
-                        st.markdown("#### Suggested Reply:")
-                        st.text_area("Copy this:", value=response.text, height=150)
+                    genai.configure(api_key=get_secret("GOOGLE_API_KEY", ""))
+                    model = genai.GenerativeModel('gemini-flash-latest')
+                    prompt = f"Write a warm, short Australian business reply to: '{review_text}'. Sign it '- The Team'."
+                    response = model.generate_content(prompt)
+                    st.text_area("Suggested Reply", value=response.text, height=150)
                 except Exception as e:
                     st.error(f"AI Error: {e}")
 
-# --- TAB 3: SETTINGS ---
+# --- TAB 3: HISTORY ---
 with tab3:
-    st.markdown("### Configuration")
-    
-    with st.container(border=True):
-        st.text_input("Business Name", key="business_name")
-        st.text_input("Google Review Link", key="review_link")
-        st.caption(f"Status: {'✅ Cloud Linked' if 'BUSINESS_NAME' in st.secrets else '⚠️ Local Mode'}")
-
-    st.markdown("---")
-    
-    if st.button("🔄 Reset / Update Settings", type="secondary"):
-        if "business_name" in st.session_state:
-            del st.session_state.business_name
-        if "review_link" in st.session_state:
-            del st.session_state.review_link
-        st.rerun()
+    if st.session_state.history:
+        df = pd.DataFrame(st.session_state.history)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.caption("No messages sent this session.")
