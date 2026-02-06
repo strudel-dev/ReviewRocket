@@ -33,7 +33,6 @@ def smart_format_phone(number):
 
 # --- ROBUST GOOGLE MAPS FETCH ---
 def fetch_stats_by_id(place_id):
-    # The "Sniper" method: Uses Place ID (100% Accuracy)
     url = f"https://places.googleapis.com/v1/places/{place_id}"
     headers = {
         "Content-Type": "application/json",
@@ -49,7 +48,6 @@ def fetch_stats_by_id(place_id):
     return None
 
 def fetch_stats_by_search(name):
-    # The "Guess" method: Uses text search (Hit or Miss)
     url = "https://places.googleapis.com/v1/places:searchText"
     headers = {
         "Content-Type": "application/json",
@@ -65,9 +63,12 @@ def fetch_stats_by_search(name):
         pass
     return None
 
-# --- LOGIN & STATE ---
+# --- SESSION STATE INITIALIZATION (The Fix) ---
 if "history" not in st.session_state: st.session_state.history = []
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
+# We explicitly create these variables so the app never crashes checking for them
+if "place_id" not in st.session_state: st.session_state.place_id = None
+if "stats" not in st.session_state: st.session_state.stats = None
 
 def check_login():
     query = st.query_params
@@ -86,13 +87,14 @@ def validate_user(password):
     user_db = st.secrets.get("users", {})
     if password in user_db:
         raw_data = user_db[password].split("|")
-        # Handle 2 parts (old way) or 3 parts (new way with ID)
         st.session_state.business_name = raw_data[0]
         st.session_state.review_link = raw_data[1]
+        # Safe check for Place ID
         st.session_state.place_id = raw_data[2] if len(raw_data) > 2 else None
         st.session_state.current_user_pass = password
         st.session_state.logged_in = True
-        if "stats" in st.session_state: del st.session_state.stats # Force refresh
+        # Force refresh of stats
+        st.session_state.stats = None 
     else:
         st.error("Invalid Key")
 
@@ -100,7 +102,7 @@ check_login()
 if not st.session_state.logged_in: st.stop()
 
 # --- LOAD STATS ---
-if "stats" not in st.session_state:
+if not st.session_state.stats:
     if st.session_state.place_id:
         st.session_state.stats = fetch_stats_by_id(st.session_state.place_id)
     else:
@@ -117,7 +119,7 @@ if st.session_state.stats:
     c2.metric("Reviews", f"{count}")
     c3.metric("Invites", len(st.session_state.history))
 else:
-    st.warning("⚠️ Connecting to Google...")
+    st.warning("⚠️ Connecting to Google Maps...")
 
 st.divider()
 
@@ -165,7 +167,8 @@ with tab2:
                     st.caption("(No text provided)")
     else:
         st.info("No reviews found yet.")
-        if not st.session_state.place_id:
+        # FIX: Safe check for place_id prevents the crash here
+        if not st.session_state.get("place_id"):
             st.caption("Tip: Add the Place ID to secrets.toml for better results.")
 
 with tab3:
@@ -173,4 +176,6 @@ with tab3:
     st.text_input("Business", value=st.session_state.business_name, disabled=True)
     if st.button("Logout", type="secondary"):
         st.session_state.logged_in = False
+        # Clear stats on logout so next user gets fresh data
+        st.session_state.stats = None
         st.rerun()
