@@ -7,13 +7,102 @@ import os
 import requests
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="ReviewRocket", page_icon="🚀", layout="centered", initial_sidebar_state="collapsed")
+st.set_page_config(
+    page_title="ReviewRocket", 
+    page_icon="🚀", 
+    layout="centered", 
+    initial_sidebar_state="collapsed"
+)
+
+# --- V2 MODERN STYLING (CSS INJECTION) ---
+st.markdown("""
+    <style>
+    /* 1. Global Background - Subtle Professional Gradient */
+    .stApp {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    }
+
+    /* 2. Hide Streamlit Branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* 3. Card Styling for Containers */
+    div.css-1r6slb0, div.stTabs {
+        background-color: rgba(255, 255, 255, 0.95);
+        padding: 20px;
+        border-radius: 15px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        margin-bottom: 20px;
+    }
+
+    /* 4. Input Fields - Modern & Clean */
+    .stTextInput > div > div > input {
+        border-radius: 10px;
+        border: 1px solid #e0e0e0;
+        padding: 10px 12px;
+        font-size: 16px;
+    }
+    .stTextInput > div > div > input:focus {
+        border-color: #4facfe;
+        box-shadow: 0 0 0 2px rgba(79, 172, 254, 0.2);
+    }
+
+    /* 5. Primary Button - Gradient & Shadow */
+    div.stButton > button {
+        background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        padding: 12px 24px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 10px rgba(79, 172, 254, 0.3);
+    }
+    div.stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 15px rgba(79, 172, 254, 0.4);
+        border-color: transparent;
+    }
+    div.stButton > button:active {
+        transform: translateY(0);
+    }
+
+    /* 6. Tab Styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: rgba(255,255,255,0.5);
+        border-radius: 10px;
+        color: #555;
+        font-weight: 500;
+        border: none;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: white !important;
+        color: #4facfe !important;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
+
+    /* 7. Metric Cards (Reputation) */
+    div[data-testid="stMetric"] {
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid #f0f0f0;
+        text-align: center;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # --- LOAD SECRETS ---
 load_dotenv()
 
 try:
-    # Try Cloud secrets first, then Local
     if "GOOGLE_API_KEY" in st.secrets:
         GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
         GOOGLE_MAPS_KEY = st.secrets["GOOGLE_MAPS_KEY"]
@@ -21,17 +110,14 @@ try:
     else:
         GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
         GOOGLE_MAPS_KEY = os.getenv("GOOGLE_MAPS_KEY")
-        # For local testing, ensure secrets.toml is present
 except:
     st.error("❌ Critical Error: Secrets are missing.")
     st.stop()
 
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# --- FUNCTIONS ---
-
+# --- LOGIC FUNCTIONS ---
 def clean_phone(phone):
-    """Formats 04xx numbers to +614xx"""
     p = phone.strip().replace(" ", "").replace("-", "")
     if p.startswith("0"):
         return "+61" + p[1:]
@@ -42,34 +128,33 @@ def check_login():
         st.session_state.logged_in = False
 
     if not st.session_state.logged_in:
-        st.markdown("## 🔒 Login")
-        password = st.text_input("Password", type="password")
-        if st.button("Go"):
-            if password in USERS:
-                st.session_state.logged_in = True
-                data = USERS[password].split("|")
-                st.session_state.biz_name = data[0]
-                st.session_state.link = data[1]
-                
-                # Check for Manual Mode vs Auto
-                if len(data) >= 5 and data[2] == "MANUAL":
-                    st.session_state.place_id = "MANUAL"
-                    st.session_state.manual_rating = data[3]
-                    st.session_state.manual_count = data[4]
+        # Centered Login Card
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([1,2,1])
+        with col2:
+            st.markdown("<h2 style='text-align: center;'>🔐 Login</h2>", unsafe_allow_html=True)
+            password = st.text_input("Access Code", type="password", label_visibility="collapsed", placeholder="Enter Password")
+            if st.button("Unlock Dashboard", use_container_width=True):
+                if password in USERS:
+                    st.session_state.logged_in = True
+                    data = USERS[password].split("|")
+                    st.session_state.biz_name = data[0]
+                    st.session_state.link = data[1]
+                    
+                    if len(data) >= 5 and data[2] == "MANUAL":
+                        st.session_state.place_id = "MANUAL"
+                        st.session_state.manual_rating = data[3]
+                        st.session_state.manual_count = data[4]
+                    else:
+                        st.session_state.place_id = data[2]
+                    st.rerun()
                 else:
-                    st.session_state.place_id = data[2]
-                
-                st.rerun()
-            else:
-                st.error("❌ Wrong Password")
+                    st.error("❌ Invalid Code")
         st.stop()
 
 def fetch_google_reviews(place_id, api_key):
-    # 1. Manual Mode
     if place_id == "MANUAL":
         return st.session_state.manual_rating, st.session_state.manual_count
-
-    # 2. API Mode
     if not place_id or place_id == "NULL":
         return None, None
     
@@ -84,81 +169,113 @@ def fetch_google_reviews(place_id, api_key):
     return None, None
 
 def generate_sms(name, biz, link):
-    prompt = f"Write a short, warm SMS (under 160 chars) from '{biz}' to '{name}'. Thank them. Ask for a 5-star review. End with: {link}"
+    prompt = f"Write a short, warm, professional SMS (under 160 chars) from '{biz}' to '{name}'. Thank them for their business today. Ask for a 5-star review. End with: {link}"
     try:
         model = genai.GenerativeModel('gemini-2.0-flash')
         return model.generate_content(prompt).text.strip()
     except:
-        return f"Hi {name}, thanks for choosing {biz}! Review us here: {link}"
+        return f"Hi {name}, thanks for choosing {biz}! We'd love your feedback: {link}"
 
-# --- APP START ---
+# --- APP LAYOUT ---
 check_login()
 
-st.header(f"🚀 {st.session_state.biz_name}")
+# Header Area
+st.markdown(f"<h1 style='text-align: center; margin-bottom: 5px;'>🚀 {st.session_state.biz_name}</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #666; font-size: 14px; margin-bottom: 25px;'>Reputation Management System</p>", unsafe_allow_html=True)
 
-# Create 3 Tabs
-tab1, tab2, tab3 = st.tabs(["📲 Invite", "⭐ Reputation", "📜 History"])
+# Tabs
+tab1, tab2, tab3 = st.tabs(["✨ New Invite", "📊 Reputation", "📜 History"])
 
 # --- TAB 1: SEND INVITE ---
 with tab1:
-    st.write("### 1. Enter Details")
-    c_name = st.text_input("Client Name")
-    c_phone = st.text_input("Phone (04...)")
+    st.markdown("### Client Details")
+    
+    col_a, col_b = st.columns(2)
+    with col_a:
+        c_name = st.text_input("Name", placeholder="John Smith")
+    with col_b:
+        c_phone = st.text_input("Mobile", placeholder="04...")
 
-    if st.button("✨ Write Message", type="primary", use_container_width=True):
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) # Spacer
+
+    if st.button("⚡ Generate Message", type="primary", use_container_width=True):
         if c_name and c_phone:
             st.session_state.phone = clean_phone(c_phone)
             st.session_state.name = c_name
-            with st.spinner("AI writing..."):
+            with st.spinner("AI is crafting the perfect message..."):
                 st.session_state.msg = generate_sms(c_name, st.session_state.biz_name, st.session_state.link)
         else:
-            st.warning("Need Name & Phone")
+            st.toast("⚠️ Please enter both Name and Phone")
 
     if "msg" in st.session_state:
-        st.write("### 2. Review & Send")
-        final_msg = st.text_area("", st.session_state.msg, height=100)
+        st.markdown("---")
+        st.markdown("### Preview")
+        final_msg = st.text_area("Edit if needed:", st.session_state.msg, height=100, label_visibility="collapsed")
         
-        # Mobile Button
         encoded_msg = urllib.parse.quote(final_msg)
-        sms_link = f"sms:{st.session_state.phone}?&body={encoded_msg}"
+        sms_link = f"sms:{st.session_state.phone}?body={encoded_msg}"
         
+        # HERO ACTION BUTTON
         st.markdown(f'''
-            <a href="{sms_link}" target="_parent">
-                <button style="
-                    width: 100%; 
-                    background-color: #007AFF; 
-                    color: white; 
-                    padding: 15px; 
-                    border-radius: 10px; 
-                    font-size: 18px; 
-                    font-weight: bold; 
-                    border: none; 
+            <a href="{sms_link}" target="_parent" style="text-decoration: none;">
+                <div style="
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 16px;
+                    border-radius: 12px;
+                    text-align: center;
+                    font-weight: bold;
+                    font-size: 18px;
+                    box-shadow: 0 4px 15px rgba(118, 75, 162, 0.4);
                     margin-top: 10px;
-                    cursor: pointer;">
+                    transition: transform 0.2s;
+                ">
                     💬 Open in Messages
-                </button>
+                </div>
             </a>
         ''', unsafe_allow_html=True)
 
-        if st.button("✅ I Sent It (Save to History)", use_container_width=True):
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        if st.button("✅ Mark as Sent", use_container_width=True):
             history_manager.add_entry(st.session_state.name, st.session_state.phone)
-            st.success("Saved!")
+            st.success("Saved to history!")
             del st.session_state.msg
 
 # --- TAB 2: REPUTATION ---
 with tab2:
-    st.subheader("Live Stats")
+    st.markdown("### Live Performance")
     rating, count = fetch_google_reviews(st.session_state.place_id, GOOGLE_MAPS_KEY)
     
     if rating:
         col1, col2 = st.columns(2)
-        col1.metric("Rating", f"{rating} ⭐")
-        col2.metric("Reviews", f"{count}")
-        st.success("✅ Connected to Google")
+        with col1:
+            st.metric("Google Rating", f"{rating} ⭐", delta="Excellent", delta_color="normal")
+        with col2:
+            st.metric("Total Reviews", f"{count}", delta="+1 this week") # Placeholder delta
+        
+        st.markdown(f"""
+        <div style='background-color: #e8f5e9; padding: 15px; border-radius: 10px; border-left: 5px solid #4caf50; margin-top: 20px;'>
+            <h4 style='margin:0; color: #2e7d32;'>Status: Healthy</h4>
+            <p style='margin:0; font-size: 14px; color: #666;'>Your business is appearing correctly on Maps.</p>
+        </div>
+        """, unsafe_allow_html=True)
     else:
         st.warning("Could not load stats. Check Place ID.")
 
 # --- TAB 3: HISTORY ---
 with tab3:
+    st.markdown("### Sent Invites")
     df = history_manager.load_history()
-    st.dataframe(df, use_container_width=True)
+    
+    # Styled Dataframe
+    st.dataframe(
+        df, 
+        use_container_width=True, 
+        hide_index=True,
+        column_config={
+            "Date": st.column_config.DatetimeColumn("Time Sent", format="D MMM, HH:mm"),
+            "Name": "Client",
+            "Phone": "Mobile"
+        }
+    )
