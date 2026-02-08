@@ -195,3 +195,73 @@ with tab1:
         col1, col2 = st.columns(2)
         with col1:
             if st.button("✅ I Sent It", use_container_width=True):
+                # Only save to history when they confirm
+                history_manager.add_entry(st.session_state.name, st.session_state.phone)
+                st.toast("Saved to History!", icon="🎉")
+                del st.session_state.msg
+                st.rerun()
+        with col2:
+            if st.button("🗑️ Discard", use_container_width=True):
+                del st.session_state.msg
+                st.rerun()
+
+# --- TAB 2: REVIEWS (SEO) ---
+with tab2:
+    st.markdown("<br>", unsafe_allow_html=True)
+    result, reviews = fetch_reviews(st.session_state.place_id, GOOGLE_MAPS_KEY)
+    
+    if result == "MANUAL":
+        # Manual Mode Fallback
+        col1, col2 = st.columns(2)
+        col1.metric("Rating", f"{st.session_state.manual_rating} ⭐")
+        col2.metric("Total", f"{st.session_state.manual_count} reviews")
+        st.info("Live reviews are disabled in Manual Mode.")
+        
+    elif result:
+        # Live Stats
+        col1, col2 = st.columns(2)
+        col1.metric("Rating", f"{result.get('rating')} ⭐")
+        col2.metric("Total", f"{result.get('user_ratings_total')} reviews")
+        
+        st.markdown("### Recent Feedback")
+        
+        # Sort reviews: Low ratings first (to prioritize response)
+        reviews.sort(key=lambda x: x.get('rating', 5))
+        
+        for review in reviews:
+            rating = review.get('rating', 5)
+            author = review.get('author_name', 'Anonymous')
+            text = review.get('text', 'No comment left.')
+            time = review.get('relative_time_description', '')
+            
+            # Badge Logic
+            if rating == 5:
+                badge = f"<span class='review-badge-high'>★★★★★ {time}</span>"
+                border_color = "#e6fcf5" # Green
+            else:
+                badge = f"<span class='review-badge-low'>{rating} Stars • Needs Reply</span>"
+                border_color = "#fff5f5" # Red
+
+            # Card Render
+            st.markdown(f"""
+            <div class="review-card" style="border-left: 5px solid {border_color};">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <strong>{author}</strong>
+                    {badge}
+                </div>
+                <div style="font-size: 14px; color: #555; margin-bottom: 12px;">"{text}"</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Reply Button
+            maps_url = result.get('url', '#')
+            st.markdown(f"<a href='{maps_url}' target='_blank' style='text-decoration:none; color:#007AFF; font-size:13px; font-weight:bold;'>↪ Reply on Google Maps</a><br><br>", unsafe_allow_html=True)
+    else:
+        st.warning("Could not load reviews. Check API Key or Place ID.")
+
+# --- TAB 3: HISTORY ---
+with tab3:
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("### 📜 Sent Log")
+    df = history_manager.load_history()
+    st.dataframe(df, use_container_width=True, hide_index=True)
