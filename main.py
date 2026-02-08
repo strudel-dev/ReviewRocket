@@ -200,37 +200,34 @@ with tab1:
 
     if "msg" in st.session_state:
         st.markdown("---")
-        st.markdown("### Preview")
-        final_msg = st.text_area("Edit if needed:", st.session_state.msg, height=100, label_visibility="collapsed")
+        st.markdown("### 💬 Preview")
         
+        # 1. The Editable Text Box
+        final_msg = st.text_area("Edit text if needed:", st.session_state.msg, height=120, label_visibility="collapsed")
+        
+        # 2. ENCODING (The magic part)
+        # We use a safer encoding that works on both iOS and Android
         encoded_msg = urllib.parse.quote(final_msg)
-        sms_link = f"sms:{st.session_state.phone}?body={encoded_msg}"
+        sms_link = f"sms:{st.session_state.phone}?&body={encoded_msg}"
         
-        # HERO ACTION BUTTON
-        st.markdown(f'''
-            <a href="{sms_link}" target="_parent" style="text-decoration: none;">
-                <div style="
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    padding: 16px;
-                    border-radius: 12px;
-                    text-align: center;
-                    font-weight: bold;
-                    font-size: 18px;
-                    box-shadow: 0 4px 15px rgba(118, 75, 162, 0.4);
-                    margin-top: 10px;
-                    transition: transform 0.2s;
-                ">
-                    💬 Open in Messages
-                </div>
-            </a>
-        ''', unsafe_allow_html=True)
+        # 3. THE NATIVE BUTTON (No HTML/CSS hacking)
+        # This uses Streamlit's official link button which breaks out of the iframe automatically.
+        st.link_button(
+            label="💬 Open in Messages", 
+            url=sms_link, 
+            type="primary", 
+            use_container_width=True
+        )
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        # 4. The "Manual Copy" Fallback (Just in case)
+        with st.expander("Button not working?"):
+            st.code(final_msg, language=None)
+            st.caption("Copy the text above and paste it into your messages app.")
 
+        # 5. The "Save to History" Button
         if st.button("✅ Mark as Sent", use_container_width=True):
             history_manager.add_entry(st.session_state.name, st.session_state.phone)
-            st.success("Saved to history!")
+            st.toast("Saved to History!")
             del st.session_state.msg
 
 # --- TAB 2: REPUTATION ---
