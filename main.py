@@ -5,6 +5,7 @@ import urllib.parse
 import history_manager 
 import os
 import requests
+from datetime import datetime
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -14,83 +15,56 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- V3 CSS: SAFE & HIGH CONTRAST ---
+# --- V6 PREMIUM CSS & UI POLISH ---
 st.markdown("""
     <style>
-    /* 1. Global Background (Matches config.toml) */
-    .stApp {
-        background-color: #f0f2f6;
-    }
+    /* Global App Styling */
+    .stApp { background-color: #f4f6f9; }
+    h1, h2, h3 { color: #1a1a1a !important; font-family: 'Inter', sans-serif; }
+    p, div, span { color: #444; }
 
-    /* 2. Card Container (White Box) */
+    /* The Main "Card" */
     div.block-container {
-        background-color: #ffffff;
-        padding: 2rem 2rem 4rem 2rem;
-        border-radius: 20px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-        max-width: 600px;
+        background: white; 
+        padding: 2rem; 
+        border-radius: 24px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.06); 
+        max-width: 550px; 
         margin: auto;
     }
 
-    /* 3. Inputs - Apple Style */
-    .stTextInput > div > div > input {
-        background-color: #ffffff !important;
-        color: #333333 !important;
-        border: 1px solid #e0e0e0;
-        border-radius: 10px;
-        padding: 12px;
-    }
-    .stTextInput > div > div > input:focus {
-        border-color: #007AFF;
-        box-shadow: 0 0 0 2px rgba(0,122,255,0.2);
-    }
-    
-    /* 4. Text Visibility Safety */
-    h1, h2, h3, p, li, .stMarkdown {
-        color: #333333 !important;
-    }
-    
-    /* 5. Metrics (Reputation) */
-    div[data-testid="stMetric"] {
-        background-color: #f8f9fa;
-        border: 1px solid #eee;
-        padding: 15px;
-        border-radius: 10px;
-        text-align: center;
-    }
-    div[data-testid="stMetricLabel"] {
-        color: #666 !important;
-    }
-    div[data-testid="stMetricValue"] {
-        color: #333 !important;
-    }
-
-    /* 6. Tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
-        background-color: transparent;
-    }
+    /* Modern Tabs */
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; background: transparent; }
     .stTabs [data-baseweb="tab"] {
-        background-color: #f1f3f5;
-        border-radius: 8px;
-        padding: 8px 16px;
-        color: #555 !important;
-        border: none;
-        font-weight: 500;
+        background: #f1f3f5; border-radius: 50px; padding: 6px 16px;
+        color: #666; font-size: 14px; font-weight: 600; border: none;
     }
-    .stTabs [aria-selected="true"] {
-        background-color: #007AFF !important;
-        color: white !important;
-    }
+    .stTabs [aria-selected="true"] { background: #222 !important; color: white !important; }
 
-    /* Hide Streamlit Bloat */
+    /* Inputs - Apple Style */
+    .stTextInput input {
+        background: #f8f9fa !important; border: 1px solid #e9ecef;
+        border-radius: 12px; padding: 12px; color: #333 !important;
+    }
+    .stTextInput input:focus { border-color: #222; }
+
+    /* Review Feed Styling */
+    .review-card {
+        background: white; border: 1px solid #eee; padding: 16px;
+        border-radius: 16px; margin-bottom: 12px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+    }
+    .review-badge-high { background: #e6fcf5; color: #0ca678; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+    .review-badge-low { background: #fff5f5; color: #fa5252; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+    
+    /* Hide Streamlit Branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
-# --- LOAD SECRETS ---
+# --- SETUP & SECRETS ---
 load_dotenv()
 
 try:
@@ -107,184 +81,117 @@ except:
 
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# --- LOGIC FUNCTIONS ---
+# --- CORE FUNCTIONS ---
+
 def clean_phone(phone):
+    """Formats 04xx numbers to +614xx for reliable SMS links"""
     p = phone.strip().replace(" ", "").replace("-", "")
-    if p.startswith("0"):
-        return "+61" + p[1:]
+    if p.startswith("0"): return "+61" + p[1:]
     return p
 
 def check_login():
-    if "logged_in" not in st.session_state:
-        st.session_state.logged_in = False
-
+    """Handles Login for both Manual and Auto accounts"""
+    if "logged_in" not in st.session_state: st.session_state.logged_in = False
+    
     if not st.session_state.logged_in:
-        # Centered Login Card
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        col1, col2, col3 = st.columns([1,2,1])
-        with col2:
-            st.markdown("<h2 style='text-align: center;'>🔐 Login</h2>", unsafe_allow_html=True)
-            password = st.text_input("Access Code", type="password", label_visibility="collapsed", placeholder="Enter Password")
-            if st.button("Unlock Dashboard", use_container_width=True):
-                if password in USERS:
-                    st.session_state.logged_in = True
-                    data = USERS[password].split("|")
-                    st.session_state.biz_name = data[0]
-                    st.session_state.link = data[1]
-                    
-                    if len(data) >= 5 and data[2] == "MANUAL":
-                        st.session_state.place_id = "MANUAL"
-                        st.session_state.manual_rating = data[3]
-                        st.session_state.manual_count = data[4]
-                    else:
-                        st.session_state.place_id = data[2]
-                    st.rerun()
+        st.markdown("<br><h2 style='text-align:center'>Welcome Back</h2>", unsafe_allow_html=True)
+        password = st.text_input("Password", type="password", label_visibility="collapsed")
+        
+        if st.button("Log In", type="primary", use_container_width=True):
+            if password in USERS:
+                st.session_state.logged_in = True
+                data = USERS[password].split("|")
+                st.session_state.biz_name = data[0]
+                st.session_state.link = data[1]
+                
+                # Detect Manual Mode vs Auto Mode
+                if len(data) >= 5 and data[2] == "MANUAL":
+                    st.session_state.place_id = "MANUAL"
+                    st.session_state.manual_rating = data[3]
+                    st.session_state.manual_count = data[4]
                 else:
-                    st.error("❌ Invalid Code")
+                    st.session_state.place_id = data[2]
+                st.rerun()
+            else:
+                st.error("Incorrect password")
         st.stop()
 
-def fetch_google_reviews(place_id, api_key):
-    if place_id == "MANUAL":
-        return st.session_state.manual_rating, st.session_state.manual_count
-    if not place_id or place_id == "NULL":
-        return None, None
+def fetch_reviews(place_id, api_key):
+    """Fetches Live Google Reviews"""
+    if place_id == "MANUAL": return "MANUAL", []
     
-    url = f"https://maps.googleapis.com/maps/api/place/details/json?place_id={place_id}&fields=rating,user_ratings_total&key={api_key}"
+    # We fetch 'reviews' and 'url' to enable the Deep Link feature
+    url = f"https://maps.googleapis.com/maps/api/place/details/json?place_id={place_id}&fields=rating,user_ratings_total,reviews,url&key={api_key}"
     try:
         response = requests.get(url)
         data = response.json()
-        if "result" in data:
-            return data["result"].get("rating", 0.0), data["result"].get("user_ratings_total", 0)
-    except:
+        if "result" in data: 
+            return data["result"], data["result"].get("reviews", [])
+    except: 
         pass
-    return None, None
+    return None, []
 
 def generate_sms(name, biz, link):
-    prompt = f"Write a short, warm, professional SMS (under 160 chars) from '{biz}' to '{name}'. Thank them for their business today. Ask for a 5-star review. End with: {link}"
+    """Uses AI to write the text"""
+    prompt = f"Write 1 short SMS (max 140 chars) from '{biz}' to '{name}'. Thank them. Ask for 5 stars. Link: {link}"
     try:
         model = genai.GenerativeModel('gemini-2.0-flash')
         return model.generate_content(prompt).text.strip()
     except:
-        return f"Hi {name}, thanks for choosing {biz}! We'd love your feedback: {link}"
+        return f"Hi {name}, thanks for choosing {biz}! Review here: {link}"
 
-# --- APP LAYOUT ---
+# --- APP START ---
 check_login()
 
-# Header Area
-st.markdown(f"<h1 style='text-align: center; margin-bottom: 5px;'>🚀 {st.session_state.biz_name}</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #666; font-size: 14px; margin-bottom: 25px;'>Reputation Management System</p>", unsafe_allow_html=True)
+# Header
+st.markdown(f"<h2 style='margin-bottom:0px;'>🚀 {st.session_state.biz_name}</h2>", unsafe_allow_html=True)
+st.caption("Reputation Manager")
 
 # Tabs
-tab1, tab2, tab3 = st.tabs(["✨ New Invite", "📊 Reputation", "📜 History"])
+tab1, tab2, tab3 = st.tabs(["New Invite", "Reviews & SEO", "History"])
 
-
-# --- TAB 1: SMART WIZARD ---
+# --- TAB 1: THE WIZARD ---
 with tab1:
-    # LOGIC: If we have a message, show STEP 2. If not, show STEP 1.
+    st.markdown("<br>", unsafe_allow_html=True)
     
-    # --- STEP 2: REVIEW & SEND (The "Action" Screen) ---
-    if "msg" in st.session_state:
-        st.markdown("### ✅ Ready to Send")
-        
-        # 1. The Message Preview (Editable)
-        final_msg = st.text_area("Message Preview:", st.session_state.msg, height=120)
-        
-        # 2. The Magic Link
-        encoded_msg = urllib.parse.quote(final_msg)
-        sms_link = f"sms:{st.session_state.phone}?body={encoded_msg}"
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # 3. BIG PRIMARY ACTION BUTTON
-        # We use st.link_button because it works perfectly on mobile
-        st.link_button(
-            label="💬 Open in Messages App", 
-            url=sms_link, 
-            type="primary", 
-            use_container_width=True
-        )
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # 4. Secondary Actions (Grid Layout)
-        col_done, col_edit = st.columns(2)
-        
-        with col_done:
-            # "Sent" button clears the state and goes back to Step 1
-            if st.button("✅ Mark Sent", use_container_width=True):
-                history_manager.add_entry(st.session_state.name, st.session_state.phone)
-                st.toast("Saved to History!", icon="🎉")
-                del st.session_state.msg
-                st.rerun()
-
-        with col_edit:
-            # "Edit" button just clears the message to go back, but keeps name/phone
-            if st.button("🔄 Start Over", use_container_width=True):
-                del st.session_state.msg
-                st.rerun()
-
-    # --- STEP 1: INPUT DETAILS (The "Start" Screen) ---
-    else:
-        st.markdown("### 👤 New Invite")
-        
-        with st.form("invite_form", clear_on_submit=False):
-            # Pre-fill if we hit "Start Over"
-            default_name = st.session_state.get("name", "")
-            # We don't pre-fill phone usually for privacy, but we can:
-            # default_phone = st.session_state.get("phone", "")
+    # STATE 1: DRAFTING
+    if "msg" not in st.session_state:
+        st.markdown("### ✉️ Draft New Message")
+        with st.form("invite"):
+            c_name = st.text_input("Client Name", placeholder="Jane Doe")
+            c_phone = st.text_input("Mobile Number", placeholder="04...")
             
-            c_name = st.text_input("Client Name", value=default_name, placeholder="e.g. John Smith")
-            c_phone = st.text_input("Mobile Number", placeholder="e.g. 0412 345 678")
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            # The Trigger
-            submitted = st.form_submit_button("✨ Draft Message", type="primary", use_container_width=True)
-            
-            if submitted:
+            # Action: Just generates, does NOT save yet
+            if st.form_submit_button("✨ Draft Message", type="primary", use_container_width=True):
                 if c_name and c_phone:
                     st.session_state.phone = clean_phone(c_phone)
                     st.session_state.name = c_name
-                    with st.spinner("AI is writing..."):
+                    with st.spinner("Drafting..."):
                         st.session_state.msg = generate_sms(c_name, st.session_state.biz_name, st.session_state.link)
-                    st.rerun() # FORCE RELOAD TO SWITCH TO STEP 2
+                    st.rerun()
                 else:
-                    st.warning("⚠️ Please enter Name and Phone")
+                    st.warning("Enter Name & Phone")
 
-# --- TAB 2: REPUTATION ---
-with tab2:
-    st.markdown("### Live Performance")
-    rating, count = fetch_google_reviews(st.session_state.place_id, GOOGLE_MAPS_KEY)
-    
-    if rating:
+    # STATE 2: SENDING & CONFIRMING
+    else:
+        st.info("Draft Ready! Click the blue button to send.")
+        
+        # Preview Box
+        final_msg = st.text_area("Preview:", st.session_state.msg, height=100)
+        encoded_msg = urllib.parse.quote(final_msg)
+        sms_link = f"sms:{st.session_state.phone}?body={encoded_msg}"
+        
+        # 1. THE SEND BUTTON (Opens Phone App)
+        st.link_button("💬 Open Messages App", url=sms_link, type="primary", use_container_width=True)
+        
+        # 2. THE FALLBACK (Restored in V6)
+        with st.expander("Link didn't work?"):
+            st.code(final_msg, language=None)
+            st.caption("Copy the text above and paste it manually.")
+
+        st.markdown("---")
+        
+        # 3. THE CONFIRMATION
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("Google Rating", f"{rating} ⭐", delta="Excellent", delta_color="normal")
-        with col2:
-            st.metric("Total Reviews", f"{count}", delta="+1 this week") # Placeholder delta
-        
-        st.markdown(f"""
-        <div style='background-color: #e8f5e9; padding: 15px; border-radius: 10px; border-left: 5px solid #4caf50; margin-top: 20px;'>
-            <h4 style='margin:0; color: #2e7d32;'>Status: Healthy</h4>
-            <p style='margin:0; font-size: 14px; color: #666;'>Your business is appearing correctly on Maps.</p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.warning("Could not load stats. Check Place ID.")
-
-# --- TAB 3: HISTORY ---
-with tab3:
-    st.markdown("### Sent Invites")
-    df = history_manager.load_history()
-    
-    # Styled Dataframe
-    st.dataframe(
-        df, 
-        use_container_width=True, 
-        hide_index=True,
-        column_config={
-            "Date": st.column_config.DatetimeColumn("Time Sent", format="D MMM, HH:mm"),
-            "Name": "Client",
-            "Phone": "Mobile"
-        }
-    )
+            if st.button("✅ I Sent It", use_container_width=True):
