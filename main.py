@@ -4,23 +4,24 @@ from dotenv import load_dotenv
 import urllib.parse
 import history_manager 
 import os
+import requests
 
-# --- PAGE CONFIGURATION (Mobile Optimized) ---
+# --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="ReviewRocket", page_icon="🚀", layout="centered", initial_sidebar_state="collapsed")
 
 # --- LOAD SECRETS ---
 load_dotenv()
 
 try:
-    # Try loading from Streamlit secrets (Cloud) first, then environment (Local)
+    # Try Cloud secrets first, then Local
     if "GOOGLE_API_KEY" in st.secrets:
         GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+        GOOGLE_MAPS_KEY = st.secrets["GOOGLE_MAPS_KEY"]
         USERS = st.secrets["users"]
     else:
         GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-        # For local testing without secrets.toml, you might need a fallback or just rely on secrets.toml
-        # This block assumes secrets.toml exists locally too.
-        pass
+        GOOGLE_MAPS_KEY = os.getenv("GOOGLE_MAPS_KEY")
+        # For local testing, ensure secrets.toml is present
 except:
     st.error("❌ Critical Error: Secrets are missing.")
     st.stop()
@@ -28,8 +29,9 @@ except:
 genai.configure(api_key=GOOGLE_API_KEY)
 
 # --- FUNCTIONS ---
+
 def clean_phone(phone):
-    """Formats 04xx numbers to +614xx for the link to work"""
+    """Formats 04xx numbers to +614xx"""
     p = phone.strip().replace(" ", "").replace("-", "")
     if p.startswith("0"):
         return "+61" + p[1:]
@@ -49,7 +51,7 @@ def check_login():
                 st.session_state.biz_name = data[0]
                 st.session_state.link = data[1]
                 
-                # Check for Manual Mode
+                # Check for Manual Mode vs Auto
                 if len(data) >= 5 and data[2] == "MANUAL":
                     st.session_state.place_id = "MANUAL"
                     st.session_state.manual_rating = data[3]
@@ -61,6 +63,25 @@ def check_login():
             else:
                 st.error("❌ Wrong Password")
         st.stop()
+
+def fetch_google_reviews(place_id, api_key):
+    # 1. Manual Mode
+    if place_id == "MANUAL":
+        return st.session_state.manual_rating, st.session_state.manual_count
+
+    # 2. API Mode
+    if not place_id or place_id == "NULL":
+        return None, None
+    
+    url = f"https://maps.googleapis.com/maps/api/place/details/json?place_id={place_id}&fields=rating,user_ratings_total&key={api_key}"
+    try:
+        response = requests.get(url)
+        data = response.json()
+        if "result" in data:
+            return data["result"].get("rating", 0.0), data["result"].get("user_ratings_total", 0)
+    except:
+        pass
+    return None, None
 
 def generate_sms(name, biz, link):
     prompt = f"Write a short, warm SMS (under 160 chars) from '{biz}' to '{name}'. Thank them. Ask for a 5-star review. End with: {link}"
@@ -75,9 +96,10 @@ check_login()
 
 st.header(f"🚀 {st.session_state.biz_name}")
 
-# Create Tabs
-tab1, tab2 = st.tabs(["📲 New Invite", "📜 History"])
+# Create 3 Tabs
+tab1, tab2, tab3 = st.tabs(["📲 Invite", "⭐ Reputation", "📜 History"])
 
+# --- TAB 1: SEND INVITE ---
 with tab1:
     st.write("### 1. Enter Details")
     c_name = st.text_input("Client Name")
@@ -96,7 +118,7 @@ with tab1:
         st.write("### 2. Review & Send")
         final_msg = st.text_area("", st.session_state.msg, height=100)
         
-        # --- THE MAGIC MOBILE BUTTON ---
+        # Mobile Button
         encoded_msg = urllib.parse.quote(final_msg)
         sms_link = f"sms:{st.session_state.phone}?&body={encoded_msg}"
         
@@ -123,6 +145,20 @@ with tab1:
             st.success("Saved!")
             del st.session_state.msg
 
+# --- TAB 2: REPUTATION ---
 with tab2:
+    st.subheader("Live Stats")
+    rating, count = fetch_google_reviews(st.session_state.place_id, GOOGLE_MAPS_KEY)
+    
+    if rating:
+        col1, col2 = st.columns(2)
+        col1.metric("Rating", f"{rating} ⭐")
+        col2.metric("Reviews", f"{count}")
+        st.success("✅ Connected to Google")
+    else:
+        st.warning("Could not load stats. Check Place ID.")
+
+# --- TAB 3: HISTORY ---
+with tab3:
     df = history_manager.load_history()
     st.dataframe(df, use_container_width=True)
