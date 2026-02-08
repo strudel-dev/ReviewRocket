@@ -1,202 +1,176 @@
 import streamlit as st
-import requests
-import os
 import google.generativeai as genai
-from urllib.parse import quote
+import os
+from twilio.rest import Client
+from dotenv import load_dotenv
+import requests
+import history_manager  # Must have history_manager.py in the same folder
 
-# 1. SETUP & STYLE
-st.set_page_config(page_title="ReviewRocket", page_icon="🚀", layout="centered")
+# --- PAGE CONFIGURATION ---
+st.set_page_config(page_title="ReviewRocket Pro", page_icon="🚀", layout="centered")
 
-st.markdown("""
-<style>
-    .stApp {margin-top: -30px;}
+# --- LOAD SECRETS ---
+load_dotenv()
+
+try:
+    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+    GOOGLE_MAPS_KEY = st.secrets["GOOGLE_MAPS_KEY"]
     
-    /* The "Native Send" Button Style */
-    .sms-button {
-        display: inline-block;
-        background-color: #007AFF; /* iPhone Blue */
-        color: white;
-        padding: 12px 24px;
-        text-align: center;
-        text-decoration: none;
-        font-size: 16px;
-        border-radius: 12px;
-        width: 100%;
-        font-family: -apple-system, sans-serif;
-        font-weight: 500;
-        margin-top: 10px;
-    }
-    .sms-button:hover { background-color: #0056b3; color: white; }
+    TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID") or st.secrets.get("TWILIO_ACCOUNT_SID")
+    TWILIO_AUTH = os.getenv("TWILIO_AUTH_TOKEN") or st.secrets.get("TWILIO_AUTH_TOKEN")
+    TWILIO_PHONE = os.getenv("TWILIO_PHONE_NUMBER") or st.secrets.get("TWILIO_PHONE_NUMBER")
     
-    /* Other Styles */
-    .review-card { background-color: white; border: 1px solid #e0e0e0; border-radius: 12px; padding: 15px; margin-bottom: 15px; }
-    .iphone-bubble { background-color: #E9E9EB; color: black; padding: 15px; border-radius: 18px; margin-bottom: 10px; font-family: sans-serif; }
-</style>
-""", unsafe_allow_html=True)
+    USERS = st.secrets["users"]
+except Exception as e:
+    st.error(f"❌ Configuration Error: Missing secrets. {e}")
+    st.stop()
 
-# 2. KEY LOADER
-def get_secret(key):
-    if key in st.secrets: return st.secrets[key]
-    return os.environ.get(key, None)
+# --- SETUP AI ---
+genai.configure(api_key=GOOGLE_API_KEY)
 
-# 3. GOOGLE MAPS & AI (Same as before)
-def fetch_stats(place_id, api_key):
-    if not place_id or not api_key: return None
-    url = f"https://places.googleapis.com/v1/places/{place_id}"
-    headers = {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": api_key,
-        "X-Goog-FieldMask": "displayName,rating,userRatingCount,reviews"
-    }
-    try:
-        resp = requests.get(url, headers=headers)
-        if resp.status_code == 200: return resp.json()
-    except: return None
-    return None
+# --- FUNCTIONS ---
 
-# 4. STATE
-if "history" not in st.session_state: st.session_state.history = []
-if "logged_in" not in st.session_state: st.session_state.logged_in = False
+def clean_phone_number(phone):
+    """Auto-formats Australian numbers to E.164"""
+    p = phone.strip().replace(" ", "").replace("-", "")
+    if p.startswith("04"):
+        return "+61" + p[1:]
+    if p.startswith("4"):
+        return "+61" + p
+    if not p.startswith("+"):
+        return "+61" + p
+    return p
 
-# 5. LOGIN
 def check_login():
-    query = st.query_params
-    url_pass = query.get("access", None)
-    if url_pass: validate_user(url_pass)
-    
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+
     if not st.session_state.logged_in:
-        st.markdown("<h1 style='text-align: center;'>ReviewRocket 🚀</h1>", unsafe_allow_html=True)
-        with st.form("login"):
-            password = st.text_input("Access Key", type="password")
-            if st.form_submit_button("Login", type="primary", use_container_width=True):
-                validate_user(password)
+        st.markdown("## 🔒 Login Required")
+        password = st.text_input("Password", type="password")
+        if st.button("Enter"):
+            if password in USERS:
+                st.session_state.logged_in = True
+                user_data = USERS[password].split("|")
+                st.session_state.business_name = user_data[0]
+                st.session_state.review_link = user_data[1]
+                st.session_state.place_id = user_data[2] if len(user_data) > 2 else None
                 st.rerun()
+            else:
+                st.error("❌ Incorrect password")
+        st.stop()
 
-def validate_user(password):
-    if "users" in st.secrets and password in st.secrets["users"]:
-        raw = st.secrets["users"][password].split("|")
-        st.session_state.business_name = raw[0]
-        st.session_state.review_link = raw[1]
-        st.session_state.place_id = raw[2] if len(raw) > 2 else None
-        st.session_state.logged_in = True
-    else:
-        st.error("Invalid Key")
+def fetch_google_reviews(place_id, api_key):
+    if not place_id or place_id == "NULL":
+        return None, None
+    url = f"https://maps.googleapis.com/maps/api/place/details/json?place_id={place_id}&fields=rating,user_ratings_total&key={api_key}"
+    try:
+        response = requests.get(url)
+        data = response.json()
+        if "result" in data:
+            return data["result"].get("rating", 0.0), data["result"].get("user_ratings_total", 0)
+    except:
+        pass
+    return None, None
 
-check_login()
-if not st.session_state.logged_in: st.stop()
-
-# 6. DASHBOARD
-st.markdown(f"### {st.session_state.business_name}")
-
-# Fetch Stats
-stats = fetch_stats(st.session_state.place_id, get_secret("GOOGLE_MAPS_KEY"))
-
-if stats:
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Rating", f"{stats.get('rating', 'N/A')} ⭐")
-    c2.metric("Reviews", f"{stats.get('userRatingCount', 0)}")
-    c3.metric("Invites Sent", len(st.session_state.history))
-st.divider()
-
-# 7. TABS
-tab1, tab2, tab3 = st.tabs(["📲 Send (Native)", "💬 Reviews", "⚙️ Settings"])
-
-# --- TAB 1: NATIVE SEND ---
-with tab1:
-    st.caption("Generate a text and open your phone's message app.")
-    
-    # Simple Input (Just Name)
-    name = st.text_input("Client Name", placeholder="e.g. Sarah")
-    
-    # Pre-filled Message
-    default_msg = f"Hi {name if name else '...'}, thanks for choosing {st.session_state.business_name}! Could you leave us a quick review? It really helps: {st.session_state.review_link}"
-    
-    # Editable box
-    msg_content = st.text_area("Message", value=default_msg, height=100)
-    
-    # THE MAGIC LINK GENERATOR
-    # We encode the message so it works in a URL
-    encoded_msg = quote(msg_content)
-    
-    # This HTML button opens the native SMS app
-    html_button = f"""
-    <a href="sms:?&body={encoded_msg}" class="sms-button" target="_blank">
-       💬 Open in Messages
-    </a>
+def generate_sms(client_name, business_name, review_link):
+    prompt = f"""
+    Write a short, warm SMS (under 160 chars) from '{business_name}' to '{client_name}'.
+    Thank them for their business today.
+    Politely ask for a 5-star review.
+    End with: {review_link}
+    No hashtags.
     """
-    
-    # Show the button
-    st.markdown(html_button, unsafe_allow_html=True)
-    
-    # Tracking Button (Optional)
-    if st.button("Mark as Sent (For Stats)"):
-        if name:
-            st.session_state.history.append({"Name": name})
-            st.success(f"Tracked invite to {name}!")
-            st.rerun()
-        else:
-            st.toast("Enter a name first")
+    try:
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except:
+        return f"Hi {client_name}, thanks for choosing {business_name}! We'd love a review: {review_link}"
 
-# --- TAB 2: AI REVIEWS ---
-with tab2:
-    if stats and 'reviews' in stats:
-        for r in stats['reviews']:
-            author = r.get('authorAttribution', {}).get('displayName', 'Anonymous')
-            stars = r.get('rating', 5)
-            text = r.get('text', {}).get('text', '')
-            
-            with st.container(border=True):
-                st.markdown(f"**{author}** <span style='float:right'>{'⭐'*stars}</span>", unsafe_allow_html=True)
-                if text:
-                    st.write(f"_{text}_")
-                    if st.button("Draft Reply", key=author):
-                        genai.configure(api_key=get_secret("GOOGLE_API_KEY"))
-                        model = genai.GenerativeModel('gemini-flash-latest')
-                        prompt = f"Write a short, warm Australian reply for {st.session_state.business_name} to: '{text}'"
-                        try:
-                            reply = model.generate_content(prompt)
-                            st.text_area("Copy this:", value=reply.text)
-                        except:
-                            st.error("AI Error")
-    else:
-        st.info("No reviews found.")
+def send_sms(to_number, body):
+    try:
+        client = Client(TWILIO_SID, TWILIO_AUTH)
+        msg = client.messages.create(body=body, from_=TWILIO_PHONE, to=to_number)
+        return True, msg.sid
+    except Exception as e:
+        return False, str(e)
 
-# --- TAB 3: SETTINGS ---
-with tab3:
+# --- APP START ---
+check_login()
+
+# Sidebar Info
+with st.sidebar:
+    st.title("🚀 ReviewRocket")
+    st.write(f"Logged in as:\n**{st.session_state.business_name}**")
     if st.button("Logout"):
         st.session_state.logged_in = False
         st.rerun()
 
-# --- TEMPORARY ID HUNTER (Paste at the bottom of main.py) ---
-st.divider()
-with st.expander("🕵️ Admin: Find Place ID"):
-    st.info("Click the button below to ask Google for the ID using your Cloud Keys.")
+st.title(f"Hello, {st.session_state.business_name.split()[0]}! 👋")
+
+# Create Tabs
+tab1, tab2, tab3 = st.tabs(["📨 Send Invite", "⭐ Reputation", "📜 History"])
+
+# --- TAB 1: SEND INVITE ---
+with tab1:
+    st.markdown("### New Client Invite")
     
-    if st.button("Find Nicolette's ID"):
-        # 1. Get the key from your working cloud secrets
-        api_key = get_secret("GOOGLE_MAPS_KEY")
-        
-        # 2. Search for her
-        url = "https://places.googleapis.com/v1/places:searchText"
-        headers = {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": api_key,
-            "X-Goog-FieldMask": "places.displayName,places.id,places.formattedAddress"
-        }
-        # We search specifically in "Bexley, NSW" to help Google find her hidden profile
-        data = {"textQuery": "Nicolette Jade Photography Bexley NSW"}
-        
-        resp = requests.post(url, json=data, headers=headers)
-        
-        if resp.status_code == 200:
-            results = resp.json()
-            if results.get("places"):
-                place = results["places"][0]
-                st.success(f"✅ Found: {place['displayName']['text']}")
-                st.write(f"**Place ID:**")
-                st.code(place["id"], language="text")
-                st.caption("Copy this ID and paste it into your Streamlit Cloud Secrets!")
-            else:
-                st.error("❌ Google found 0 matches. Try changing the name.")
+    col1, col2 = st.columns(2)
+    with col1:
+        # We use keys to allow clearing the form later
+        c_name = st.text_input("Client Name", key="input_name")
+    with col2:
+        c_phone = st.text_input("Phone (e.g. 0412...)", key="input_phone")
+
+    if st.button("✨ Draft Message", type="primary"):
+        if c_name and c_phone:
+            formatted_phone = clean_phone_number(c_phone)
+            st.session_state.target_phone = formatted_phone
+            st.session_state.target_name = c_name
+            
+            with st.spinner("AI is writing..."):
+                st.session_state.generated_msg = generate_sms(c_name, st.session_state.business_name, st.session_state.review_link)
         else:
-            st.error(f"API Error: {resp.text}")
+            st.warning("Please enter both Name and Phone.")
+
+    # Show Preview if message is generated
+    if "generated_msg" in st.session_state:
+        st.info("👇 Preview your message:")
+        msg_to_send = st.text_area("Edit if needed:", st.session_state.generated_msg, height=100)
+        
+        if st.button("🚀 SEND SMS"):
+            with st.spinner("Sending..."):
+                success, info = send_sms(st.session_state.target_phone, msg_to_send)
+                
+                if success:
+                    st.success(f"✅ Sent to {st.session_state.target_name}!")
+                    # Save to History
+                    history_manager.add_entry(st.session_state.target_name, st.session_state.target_phone, "Sent")
+                    # Clear session to reset form
+                    del st.session_state.generated_msg
+                else:
+                    st.error(f"❌ Failed: {info}")
+
+# --- TAB 2: REVIEWS ---
+with tab2:
+    st.header("Live Google Stats")
+    if st.session_state.place_id:
+        rating, count = fetch_google_reviews(st.session_state.place_id, GOOGLE_MAPS_KEY)
+        if rating:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Rating", f"{rating} ⭐")
+            c2.metric("Reviews", f"{count}")
+            c3.success("Active")
+        else:
+            st.warning("Could not load stats. Check Place ID.")
+
+# --- TAB 3: HISTORY ---
+with tab3:
+    st.header("Client History")
+    df = history_manager.load_history()
+    if not df.empty:
+        st.dataframe(df, use_container_width=True)
+        st.download_button("📥 Download CSV", df.to_csv(index=False), "history.csv")
+    else:
+        st.info("No invites sent yet.")
