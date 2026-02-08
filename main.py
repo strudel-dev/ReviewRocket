@@ -14,88 +14,79 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- V2 MODERN STYLING (CSS INJECTION) ---
+# --- V3 CSS: SAFE & HIGH CONTRAST ---
 st.markdown("""
     <style>
-    /* 1. Global Background - Subtle Professional Gradient */
+    /* 1. Global Background (Matches config.toml) */
     .stApp {
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        background-color: #f0f2f6;
     }
 
-    /* 2. Hide Streamlit Branding */
+    /* 2. Card Container (White Box) */
+    div.block-container {
+        background-color: #ffffff;
+        padding: 2rem 2rem 4rem 2rem;
+        border-radius: 20px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        max-width: 600px;
+        margin: auto;
+    }
+
+    /* 3. Inputs - Apple Style */
+    .stTextInput > div > div > input {
+        background-color: #ffffff !important;
+        color: #333333 !important;
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        padding: 12px;
+    }
+    .stTextInput > div > div > input:focus {
+        border-color: #007AFF;
+        box-shadow: 0 0 0 2px rgba(0,122,255,0.2);
+    }
+    
+    /* 4. Text Visibility Safety */
+    h1, h2, h3, p, li, .stMarkdown {
+        color: #333333 !important;
+    }
+    
+    /* 5. Metrics (Reputation) */
+    div[data-testid="stMetric"] {
+        background-color: #f8f9fa;
+        border: 1px solid #eee;
+        padding: 15px;
+        border-radius: 10px;
+        text-align: center;
+    }
+    div[data-testid="stMetricLabel"] {
+        color: #666 !important;
+    }
+    div[data-testid="stMetricValue"] {
+        color: #333 !important;
+    }
+
+    /* 6. Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+        background-color: transparent;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #f1f3f5;
+        border-radius: 8px;
+        padding: 8px 16px;
+        color: #555 !important;
+        border: none;
+        font-weight: 500;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #007AFF !important;
+        color: white !important;
+    }
+
+    /* Hide Streamlit Bloat */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
-
-    /* 3. Card Styling for Containers */
-    div.css-1r6slb0, div.stTabs {
-        background-color: rgba(255, 255, 255, 0.95);
-        padding: 20px;
-        border-radius: 15px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-        margin-bottom: 20px;
-    }
-
-    /* 4. Input Fields - Modern & Clean */
-    .stTextInput > div > div > input {
-        border-radius: 10px;
-        border: 1px solid #e0e0e0;
-        padding: 10px 12px;
-        font-size: 16px;
-    }
-    .stTextInput > div > div > input:focus {
-        border-color: #4facfe;
-        box-shadow: 0 0 0 2px rgba(79, 172, 254, 0.2);
-    }
-
-    /* 5. Primary Button - Gradient & Shadow */
-    div.stButton > button {
-        background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);
-        color: white;
-        border: none;
-        border-radius: 10px;
-        padding: 12px 24px;
-        font-weight: 600;
-        letter-spacing: 0.5px;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 10px rgba(79, 172, 254, 0.3);
-    }
-    div.stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 15px rgba(79, 172, 254, 0.4);
-        border-color: transparent;
-    }
-    div.stButton > button:active {
-        transform: translateY(0);
-    }
-
-    /* 6. Tab Styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
-        background-color: rgba(255,255,255,0.5);
-        border-radius: 10px;
-        color: #555;
-        font-weight: 500;
-        border: none;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: white !important;
-        color: #4facfe !important;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-    }
-
-    /* 7. Metric Cards (Reputation) */
-    div[data-testid="stMetric"] {
-        background-color: #ffffff;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #f0f0f0;
-        text-align: center;
-    }
     </style>
 """, unsafe_allow_html=True)
 
