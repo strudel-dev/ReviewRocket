@@ -1,44 +1,38 @@
 import streamlit as st
 import google.generativeai as genai
-import os
-from twilio.rest import Client
 from dotenv import load_dotenv
-import requests
-import history_manager  # Must have history_manager.py in the same folder
+import urllib.parse
+import history_manager 
+import os
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="ReviewRocket Pro", page_icon="🚀", layout="centered")
+# --- PAGE CONFIGURATION (Mobile Optimized) ---
+st.set_page_config(page_title="ReviewRocket", page_icon="🚀", layout="centered", initial_sidebar_state="collapsed")
 
 # --- LOAD SECRETS ---
 load_dotenv()
 
 try:
-    GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
-    GOOGLE_MAPS_KEY = st.secrets["GOOGLE_MAPS_KEY"]
-    
-    TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID") or st.secrets.get("TWILIO_ACCOUNT_SID")
-    TWILIO_AUTH = os.getenv("TWILIO_AUTH_TOKEN") or st.secrets.get("TWILIO_AUTH_TOKEN")
-    TWILIO_PHONE = os.getenv("TWILIO_PHONE_NUMBER") or st.secrets.get("TWILIO_PHONE_NUMBER")
-    
-    USERS = st.secrets["users"]
-except Exception as e:
-    st.error(f"❌ Configuration Error: Missing secrets. {e}")
+    # Try loading from Streamlit secrets (Cloud) first, then environment (Local)
+    if "GOOGLE_API_KEY" in st.secrets:
+        GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+        USERS = st.secrets["users"]
+    else:
+        GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+        # For local testing without secrets.toml, you might need a fallback or just rely on secrets.toml
+        # This block assumes secrets.toml exists locally too.
+        pass
+except:
+    st.error("❌ Critical Error: Secrets are missing.")
     st.stop()
 
-# --- SETUP AI ---
 genai.configure(api_key=GOOGLE_API_KEY)
 
 # --- FUNCTIONS ---
-
-def clean_phone_number(phone):
-    """Auto-formats Australian numbers to E.164"""
+def clean_phone(phone):
+    """Formats 04xx numbers to +614xx for the link to work"""
     p = phone.strip().replace(" ", "").replace("-", "")
-    if p.startswith("04"):
+    if p.startswith("0"):
         return "+61" + p[1:]
-    if p.startswith("4"):
-        return "+61" + p
-    if not p.startswith("+"):
-        return "+61" + p
     return p
 
 def check_login():
@@ -46,131 +40,89 @@ def check_login():
         st.session_state.logged_in = False
 
     if not st.session_state.logged_in:
-        st.markdown("## 🔒 Login Required")
+        st.markdown("## 🔒 Login")
         password = st.text_input("Password", type="password")
-        if st.button("Enter"):
+        if st.button("Go"):
             if password in USERS:
                 st.session_state.logged_in = True
-                user_data = USERS[password].split("|")
-                st.session_state.business_name = user_data[0]
-                st.session_state.review_link = user_data[1]
-                st.session_state.place_id = user_data[2] if len(user_data) > 2 else None
+                data = USERS[password].split("|")
+                st.session_state.biz_name = data[0]
+                st.session_state.link = data[1]
+                
+                # Check for Manual Mode
+                if len(data) >= 5 and data[2] == "MANUAL":
+                    st.session_state.place_id = "MANUAL"
+                    st.session_state.manual_rating = data[3]
+                    st.session_state.manual_count = data[4]
+                else:
+                    st.session_state.place_id = data[2]
+                
                 st.rerun()
             else:
-                st.error("❌ Incorrect password")
+                st.error("❌ Wrong Password")
         st.stop()
 
-def fetch_google_reviews(place_id, api_key):
-    if not place_id or place_id == "NULL":
-        return None, None
-    url = f"https://maps.googleapis.com/maps/api/place/details/json?place_id={place_id}&fields=rating,user_ratings_total&key={api_key}"
-    try:
-        response = requests.get(url)
-        data = response.json()
-        if "result" in data:
-            return data["result"].get("rating", 0.0), data["result"].get("user_ratings_total", 0)
-    except:
-        pass
-    return None, None
-
-def generate_sms(client_name, business_name, review_link):
-    prompt = f"""
-    Write a short, warm SMS (under 160 chars) from '{business_name}' to '{client_name}'.
-    Thank them for their business today.
-    Politely ask for a 5-star review.
-    End with: {review_link}
-    No hashtags.
-    """
+def generate_sms(name, biz, link):
+    prompt = f"Write a short, warm SMS (under 160 chars) from '{biz}' to '{name}'. Thank them. Ask for a 5-star review. End with: {link}"
     try:
         model = genai.GenerativeModel('gemini-2.0-flash')
-        response = model.generate_content(prompt)
-        return response.text.strip()
+        return model.generate_content(prompt).text.strip()
     except:
-        return f"Hi {client_name}, thanks for choosing {business_name}! We'd love a review: {review_link}"
-
-def send_sms(to_number, body):
-    try:
-        client = Client(TWILIO_SID, TWILIO_AUTH)
-        msg = client.messages.create(body=body, from_=TWILIO_PHONE, to=to_number)
-        return True, msg.sid
-    except Exception as e:
-        return False, str(e)
+        return f"Hi {name}, thanks for choosing {biz}! Review us here: {link}"
 
 # --- APP START ---
 check_login()
 
-# Sidebar Info
-with st.sidebar:
-    st.title("🚀 ReviewRocket")
-    st.write(f"Logged in as:\n**{st.session_state.business_name}**")
-    if st.button("Logout"):
-        st.session_state.logged_in = False
-        st.rerun()
-
-st.title(f"Hello, {st.session_state.business_name.split()[0]}! 👋")
+st.header(f"🚀 {st.session_state.biz_name}")
 
 # Create Tabs
-tab1, tab2, tab3 = st.tabs(["📨 Send Invite", "⭐ Reputation", "📜 History"])
+tab1, tab2 = st.tabs(["📲 New Invite", "📜 History"])
 
-# --- TAB 1: SEND INVITE ---
 with tab1:
-    st.markdown("### New Client Invite")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        # We use keys to allow clearing the form later
-        c_name = st.text_input("Client Name", key="input_name")
-    with col2:
-        c_phone = st.text_input("Phone (e.g. 0412...)", key="input_phone")
+    st.write("### 1. Enter Details")
+    c_name = st.text_input("Client Name")
+    c_phone = st.text_input("Phone (04...)")
 
-    if st.button("✨ Draft Message", type="primary"):
+    if st.button("✨ Write Message", type="primary", use_container_width=True):
         if c_name and c_phone:
-            formatted_phone = clean_phone_number(c_phone)
-            st.session_state.target_phone = formatted_phone
-            st.session_state.target_name = c_name
-            
-            with st.spinner("AI is writing..."):
-                st.session_state.generated_msg = generate_sms(c_name, st.session_state.business_name, st.session_state.review_link)
+            st.session_state.phone = clean_phone(c_phone)
+            st.session_state.name = c_name
+            with st.spinner("AI writing..."):
+                st.session_state.msg = generate_sms(c_name, st.session_state.biz_name, st.session_state.link)
         else:
-            st.warning("Please enter both Name and Phone.")
+            st.warning("Need Name & Phone")
 
-    # Show Preview if message is generated
-    if "generated_msg" in st.session_state:
-        st.info("👇 Preview your message:")
-        msg_to_send = st.text_area("Edit if needed:", st.session_state.generated_msg, height=100)
+    if "msg" in st.session_state:
+        st.write("### 2. Review & Send")
+        final_msg = st.text_area("", st.session_state.msg, height=100)
         
-        if st.button("🚀 SEND SMS"):
-            with st.spinner("Sending..."):
-                success, info = send_sms(st.session_state.target_phone, msg_to_send)
-                
-                if success:
-                    st.success(f"✅ Sent to {st.session_state.target_name}!")
-                    # Save to History
-                    history_manager.add_entry(st.session_state.target_name, st.session_state.target_phone, "Sent")
-                    # Clear session to reset form
-                    del st.session_state.generated_msg
-                else:
-                    st.error(f"❌ Failed: {info}")
+        # --- THE MAGIC MOBILE BUTTON ---
+        encoded_msg = urllib.parse.quote(final_msg)
+        sms_link = f"sms:{st.session_state.phone}?&body={encoded_msg}"
+        
+        st.markdown(f'''
+            <a href="{sms_link}" target="_parent">
+                <button style="
+                    width: 100%; 
+                    background-color: #007AFF; 
+                    color: white; 
+                    padding: 15px; 
+                    border-radius: 10px; 
+                    font-size: 18px; 
+                    font-weight: bold; 
+                    border: none; 
+                    margin-top: 10px;
+                    cursor: pointer;">
+                    💬 Open in Messages
+                </button>
+            </a>
+        ''', unsafe_allow_html=True)
 
-# --- TAB 2: REVIEWS ---
+        if st.button("✅ I Sent It (Save to History)", use_container_width=True):
+            history_manager.add_entry(st.session_state.name, st.session_state.phone)
+            st.success("Saved!")
+            del st.session_state.msg
+
 with tab2:
-    st.header("Live Google Stats")
-    if st.session_state.place_id:
-        rating, count = fetch_google_reviews(st.session_state.place_id, GOOGLE_MAPS_KEY)
-        if rating:
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Rating", f"{rating} ⭐")
-            c2.metric("Reviews", f"{count}")
-            c3.success("Active")
-        else:
-            st.warning("Could not load stats. Check Place ID.")
-
-# --- TAB 3: HISTORY ---
-with tab3:
-    st.header("Client History")
     df = history_manager.load_history()
-    if not df.empty:
-        st.dataframe(df, use_container_width=True)
-        st.download_button("📥 Download CSV", df.to_csv(index=False), "history.csv")
-    else:
-        st.info("No invites sent yet.")
+    st.dataframe(df, use_container_width=True)
