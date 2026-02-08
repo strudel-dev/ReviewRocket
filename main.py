@@ -177,58 +177,79 @@ st.markdown("<p style='text-align: center; color: #666; font-size: 14px; margin-
 # Tabs
 tab1, tab2, tab3 = st.tabs(["✨ New Invite", "📊 Reputation", "📜 History"])
 
-# --- TAB 1: SEND INVITE ---
+
+# --- TAB 1: SMART WIZARD ---
 with tab1:
-    st.markdown("### Client Details")
+    # LOGIC: If we have a message, show STEP 2. If not, show STEP 1.
     
-    col_a, col_b = st.columns(2)
-    with col_a:
-        c_name = st.text_input("Name", placeholder="John Smith")
-    with col_b:
-        c_phone = st.text_input("Mobile", placeholder="04...")
-
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True) # Spacer
-
-    if st.button("⚡ Generate Message", type="primary", use_container_width=True):
-        if c_name and c_phone:
-            st.session_state.phone = clean_phone(c_phone)
-            st.session_state.name = c_name
-            with st.spinner("AI is crafting the perfect message..."):
-                st.session_state.msg = generate_sms(c_name, st.session_state.biz_name, st.session_state.link)
-        else:
-            st.toast("⚠️ Please enter both Name and Phone")
-
+    # --- STEP 2: REVIEW & SEND (The "Action" Screen) ---
     if "msg" in st.session_state:
-        st.markdown("---")
-        st.markdown("### 💬 Preview")
+        st.markdown("### ✅ Ready to Send")
         
-        # 1. The Editable Text Box
-        final_msg = st.text_area("Edit text if needed:", st.session_state.msg, height=120, label_visibility="collapsed")
+        # 1. The Message Preview (Editable)
+        final_msg = st.text_area("Message Preview:", st.session_state.msg, height=120)
         
-        # 2. ENCODING (The magic part)
-        # We use a safer encoding that works on both iOS and Android
+        # 2. The Magic Link
         encoded_msg = urllib.parse.quote(final_msg)
-        sms_link = f"sms:{st.session_state.phone}?&body={encoded_msg}"
+        sms_link = f"sms:{st.session_state.phone}?body={encoded_msg}"
         
-        # 3. THE NATIVE BUTTON (No HTML/CSS hacking)
-        # This uses Streamlit's official link button which breaks out of the iframe automatically.
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # 3. BIG PRIMARY ACTION BUTTON
+        # We use st.link_button because it works perfectly on mobile
         st.link_button(
-            label="💬 Open in Messages", 
+            label="💬 Open in Messages App", 
             url=sms_link, 
             type="primary", 
             use_container_width=True
         )
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # 4. Secondary Actions (Grid Layout)
+        col_done, col_edit = st.columns(2)
+        
+        with col_done:
+            # "Sent" button clears the state and goes back to Step 1
+            if st.button("✅ Mark Sent", use_container_width=True):
+                history_manager.add_entry(st.session_state.name, st.session_state.phone)
+                st.toast("Saved to History!", icon="🎉")
+                del st.session_state.msg
+                st.rerun()
 
-        # 4. The "Manual Copy" Fallback (Just in case)
-        with st.expander("Button not working?"):
-            st.code(final_msg, language=None)
-            st.caption("Copy the text above and paste it into your messages app.")
+        with col_edit:
+            # "Edit" button just clears the message to go back, but keeps name/phone
+            if st.button("🔄 Start Over", use_container_width=True):
+                del st.session_state.msg
+                st.rerun()
 
-        # 5. The "Save to History" Button
-        if st.button("✅ Mark as Sent", use_container_width=True):
-            history_manager.add_entry(st.session_state.name, st.session_state.phone)
-            st.toast("Saved to History!")
-            del st.session_state.msg
+    # --- STEP 1: INPUT DETAILS (The "Start" Screen) ---
+    else:
+        st.markdown("### 👤 New Invite")
+        
+        with st.form("invite_form", clear_on_submit=False):
+            # Pre-fill if we hit "Start Over"
+            default_name = st.session_state.get("name", "")
+            # We don't pre-fill phone usually for privacy, but we can:
+            # default_phone = st.session_state.get("phone", "")
+            
+            c_name = st.text_input("Client Name", value=default_name, placeholder="e.g. John Smith")
+            c_phone = st.text_input("Mobile Number", placeholder="e.g. 0412 345 678")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # The Trigger
+            submitted = st.form_submit_button("✨ Draft Message", type="primary", use_container_width=True)
+            
+            if submitted:
+                if c_name and c_phone:
+                    st.session_state.phone = clean_phone(c_phone)
+                    st.session_state.name = c_name
+                    with st.spinner("AI is writing..."):
+                        st.session_state.msg = generate_sms(c_name, st.session_state.biz_name, st.session_state.link)
+                    st.rerun() # FORCE RELOAD TO SWITCH TO STEP 2
+                else:
+                    st.warning("⚠️ Please enter Name and Phone")
 
 # --- TAB 2: REPUTATION ---
 with tab2:
